@@ -9,7 +9,7 @@ import { formatCurrency, formatDateTime, getToday, getMonthStart } from '../util
 import { PageLoader } from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Search, Filter, Eye, Ban, Receipt } from 'lucide-react'
+import { Search, Filter, Eye, Ban, Receipt, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const STATUS_BADGE: Record<string, string> = {
@@ -171,7 +171,7 @@ export default function Sales() {
               ) : (
                 filtered.map(sale => (
                   <tr key={sale.id}>
-                    <td className="font-mono text-xs font-bold text-orange-600">{sale.sale_number}</td>
+                    <td className="font-mono text-xs font-extrabold text-red-600">{sale.sale_number}</td>
                     <td className="text-xs">{formatDateTime(sale.created_at)}</td>
                     <td className="text-xs">{sale.branch_name}</td>
                     <td>{sale.cashier_name}</td>
@@ -180,8 +180,11 @@ export default function Sales() {
                     <td><span className={`badge ${STATUS_BADGE[sale.status]}`}>{STATUS_LABEL[sale.status]}</span></td>
                     <td>
                       <div className="flex gap-1">
-                        <button onClick={() => navigate(`/ventas/${sale.id}`)} className="btn btn-ghost btn-sm p-1.5" title="Ver detalle">
+                        <button onClick={() => navigate(`/ventas/${sale.id}`)} className="btn btn-ghost btn-sm p-1.5 text-gray-600 hover:text-red-600 hover:bg-red-50" title="Ver detalle">
                           <Eye size={14} />
+                        </button>
+                        <button onClick={() => navigate(`/ventas/${sale.id}`)} className="btn btn-ghost btn-sm p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50" title="Imprimir Ticket">
+                          <Printer size={14} />
                         </button>
                         {isAdmin && sale.status === 'completed' && (
                           <button onClick={() => setVoidModal(sale)} className="btn btn-ghost btn-sm p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50" title="Anular">

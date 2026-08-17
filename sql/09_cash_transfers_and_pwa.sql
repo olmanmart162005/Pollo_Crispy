@@ -4,6 +4,17 @@
 -- ============================================================
 
 -- ============================================================
+-- 0. FUNCIÓN HELPER (Asegurar existencia de is_admin_or_super)
+-- ============================================================
+CREATE OR REPLACE FUNCTION is_admin_or_super()
+RETURNS BOOLEAN AS $$
+  SELECT COALESCE(
+    (SELECT role FROM profiles WHERE id = auth.uid()) IN ('SUPER_ADMIN', 'ADMIN'),
+    FALSE
+  );
+$$ LANGUAGE SQL SECURITY DEFINER STABLE;
+
+-- ============================================================
 -- 1. TABLA: cash_transfers (Envíos / Retiros de Efectivo de Caja)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS cash_transfers (

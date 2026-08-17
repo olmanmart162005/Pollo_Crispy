@@ -121,7 +121,7 @@ export default function POS() {
       setCombos(cbs)
 
       if (profile?.id) {
-        const reg = await cashService.getOpenRegister(profile.id)
+        const reg = await cashService.getOpenRegister(profile.id, activeBranch?.id)
         setOpenRegister(reg)
       }
     } catch (err) {

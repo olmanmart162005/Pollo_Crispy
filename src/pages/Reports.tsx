@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useBranch } from '../context/BranchContext'
 import { usePermissions } from '../hooks/usePermissions'
 import { reportsService } from '../services/reports.service'
+import { cashTransfersService } from '../services/cashTransfers.service'
+import { cashService } from '../services/cash.service'
+import { CashTransfer, CashRegisterRecord } from '../types'
 import { formatCurrency, getToday, getMonthStart } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import { generateReport, printReport } from '../utils/pdfReport'
@@ -14,7 +17,7 @@ import {
 } from 'recharts'
 import toast from 'react-hot-toast'
 
-type ReportType = 'ventas' | 'top_productos' | 'top_combos' | 'cajeros' | 'sucursales' | 'metodos_pago'
+type ReportType = 'ventas' | 'top_productos' | 'top_combos' | 'cajeros' | 'sucursales' | 'metodos_pago' | 'envios' | 'cierre_caja'
 
 export default function Reports() {
   const { activeBranch } = useBranch()
@@ -31,23 +34,27 @@ export default function Reports() {
   const [dailySales, setDailySales] = useState<{ sale_date: string; total_amount: number; total_sales: number }[]>([])
   const [cashierSales, setCashierSales] = useState<{ cashier_name: string; total_amount: number; total_sales: number }[]>([])
   const [branchSales, setBranchSales] = useState<{ branch_name: string; total_amount: number; total_sales: number }[]>([])
+  const [transfersList, setTransfersList] = useState<CashTransfer[]>([])
+  const [registersList, setRegistersList] = useState<CashRegisterRecord[]>([])
 
   const branchId = isSuperAdmin ? null : (activeBranch?.id || null)
   const branchName = isSuperAdmin ? 'Todas las sucursales' : (activeBranch?.name || '')
 
-  useEffect(() => { loadReports() }, [activeBranch?.id])
+  useEffect(() => { loadReports() }, [activeBranch?.id, startDate, endDate])
 
   const loadReports = async () => {
     setLoading(true)
     try {
       const now = new Date()
-      const [s, tp, tc, ds, cs, bs] = await Promise.all([
+      const [s, tp, tc, ds, cs, bs, trs, regs] = await Promise.all([
         reportsService.getSummary(branchId, startDate, endDate),
         reportsService.getTopProducts(branchId, startDate, endDate, 10),
         reportsService.getTopCombos(branchId, startDate, endDate, 10),
         reportsService.getDailySales(branchId, now.getFullYear(), now.getMonth() + 1),
         reportsService.getSalesByCashier(branchId, startDate, endDate),
         isSuperAdmin ? reportsService.getSalesByBranch(startDate, endDate) : Promise.resolve([]),
+        cashTransfersService.getTransfers({ branchId: branchId || undefined, startDate, endDate }),
+        cashService.getRegisters({ branchId: branchId || undefined, limit: 30 }),
       ])
       setSummary(s || {})
       setTopProducts((tp || []).map((p: Record<string, unknown>) => ({ name: p.name as string, quantity: Number(p.quantity), revenue: Number(p.revenue) })))
@@ -55,6 +62,8 @@ export default function Reports() {
       setDailySales((ds || []).map((d: Record<string, unknown>) => ({ sale_date: d.sale_date as string, total_amount: Number(d.total_amount), total_sales: Number(d.total_sales) })))
       setCashierSales((cs || []).map((c: Record<string, unknown>) => ({ cashier_name: c.cashier_name as string, total_amount: Number(c.total_amount), total_sales: Number(c.total_sales) })))
       setBranchSales((bs || []).map((b: Record<string, unknown>) => ({ branch_name: b.branch_name as string, total_amount: Number(b.total_amount), total_sales: Number(b.total_sales) })))
+      setTransfersList(trs)
+      setRegistersList(regs)
     } catch (err) {
       console.error(err)
       toast.error('Error cargando reportes')
@@ -208,6 +217,55 @@ export default function Reports() {
           ],
         }
 
+      case 'envios':
+        return {
+          title: 'Envíos / Retiros de Efectivo',
+          columns: [
+            { header: 'Fecha y Hora', dataKey: 'fecha', align: 'left' as const },
+            { header: 'Enviado por', dataKey: 'remitente', align: 'left' as const },
+            { header: 'Recibido por', dataKey: 'destinatario', align: 'left' as const },
+            { header: 'Motivo', dataKey: 'motivo', align: 'left' as const },
+            { header: 'Monto (L)', dataKey: 'monto', align: 'right' as const, width: 45 },
+          ],
+          rows: transfersList.map(t => ({
+            fecha: `${t.transfer_date || ''} ${t.transfer_time || ''}`,
+            remitente: t.sender_name || 'Cajero',
+            destinatario: t.recipient_name,
+            motivo: t.reason,
+            monto: formatCurrency(t.amount, 'L'),
+          })),
+          summary: [
+            { label: 'Total Retiros / Envíos', value: String(transfersList.length) },
+            { label: 'MONTO TOTAL RETIRADO', value: formatCurrency(transfersList.reduce((s, t) => s + Number(t.amount), 0), 'L'), bold: true },
+          ],
+        }
+
+      case 'cierre_caja':
+        return {
+          title: 'Cierres de Caja y Arqueos',
+          columns: [
+            { header: 'Apertura', dataKey: 'apertura', align: 'left' as const },
+            { header: 'Cajero', dataKey: 'cajero', align: 'left' as const },
+            { header: 'Fondo Inicial', dataKey: 'inicial', align: 'right' as const },
+            { header: 'Ventas Totales', dataKey: 'ventas', align: 'right' as const },
+            { header: 'Retiros', dataKey: 'retiros', align: 'right' as const },
+            { header: 'Esperado', dataKey: 'esperado', align: 'right' as const },
+            { header: 'Diferencia', dataKey: 'diferencia', align: 'right' as const },
+          ],
+          rows: registersList.map(r => ({
+            apertura: r.opened_at ? new Date(r.opened_at).toLocaleDateString('es-HN') : '—',
+            cajero: r.cashier_name || 'Cajero',
+            inicial: formatCurrency(r.opening_amount, 'L'),
+            ventas: formatCurrency(r.total_amount || 0, 'L'),
+            retiros: formatCurrency(r.total_transfers || 0, 'L'),
+            esperado: formatCurrency(r.expected_cash || 0, 'L'),
+            diferencia: r.difference !== null && r.difference !== undefined ? formatCurrency(r.difference, 'L') : '—',
+          })),
+          summary: [
+            { label: 'Total Cierres Registrados', value: String(registersList.length) },
+          ],
+        }
+
       default:
         return { title: 'Reporte', columns: [], rows: [], summary: [] }
     }
@@ -264,6 +322,8 @@ export default function Reports() {
 
   const REPORT_TABS: { id: ReportType; label: string }[] = [
     { id: 'ventas', label: '💰 Ventas' },
+    { id: 'envios', label: '💸 Envíos de Efectivo' },
+    { id: 'cierre_caja', label: '🏦 Cierres de Caja' },
     { id: 'top_productos', label: '🍗 Top Productos' },
     { id: 'top_combos', label: '🍱 Top Combos' },
     { id: 'cajeros', label: '👤 Por Cajero' },

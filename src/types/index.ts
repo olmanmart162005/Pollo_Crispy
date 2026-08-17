@@ -136,6 +136,7 @@ export interface CashRegisterRecord {
   opening_amount: number
   closing_amount?: number
   expected_cash?: number
+  current_expected_cash?: number
   difference?: number
   observations?: string
   opened_at: string
@@ -145,6 +146,29 @@ export interface CashRegisterRecord {
   cash_amount?: number
   card_amount?: number
   transfer_amount?: number
+  total_transfers?: number
+}
+
+export interface CashTransfer {
+  id: string
+  branch_id: string
+  branch_name?: string
+  branch_code?: string
+  cash_register_id?: string
+  register_opened_at?: string
+  sender_id: string
+  sender_name?: string
+  recipient_name: string
+  amount: number
+  reason: string
+  notes?: string
+  status: 'confirmed' | 'pending' | 'cancelled'
+  authorized_by?: string
+  authorizer_name?: string
+  confirmed_at?: string
+  created_at: string
+  transfer_date?: string
+  transfer_time?: string
 }
 
 export interface AuditLog {

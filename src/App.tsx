@@ -19,6 +19,17 @@ import Reports from './pages/Reports'
 import Audit from './pages/Audit'
 import Settings from './pages/Settings'
 
+import CashTransfers from './pages/CashTransfers'
+import { useAuth } from './context/AuthContext'
+
+function HomeRedirect() {
+  const { profile } = useAuth()
+  if (profile?.role === 'CAJERO') {
+    return <Navigate to="/pos" replace />
+  }
+  return <Navigate to="/dashboard" replace />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -29,19 +40,20 @@ export default function App() {
             toastOptions={{
               duration: 3500,
               style: { fontFamily: 'Inter, sans-serif', fontSize: '14px', borderRadius: '10px' },
-              success: { iconTheme: { primary: '#f97316', secondary: '#fff' } },
+              success: { iconTheme: { primary: '#dc2626', secondary: '#fff' } },
             }}
           />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<MainLayout />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<HomeRedirect />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/pos" element={<POS />} />
                 <Route path="/ventas" element={<Sales />} />
                 <Route path="/ventas/:id" element={<SaleDetail />} />
                 <Route path="/caja" element={<CashRegister />} />
+                <Route path="/envios" element={<CashTransfers />} />
                 <Route path="/productos" element={<Products />} />
                 <Route path="/categorias" element={<Categories />} />
                 <Route path="/combos" element={<Combos />} />

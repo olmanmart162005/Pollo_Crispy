@@ -3,7 +3,7 @@ import {
   LayoutDashboard, ShoppingCart, Receipt, Archive,
   Package, Layers, MapPin, Users, BarChart3,
   ClipboardList, Settings, LogOut, X, ChevronRight,
-  Store
+  Store, Banknote
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useBranch } from '../../context/BranchContext'
@@ -23,10 +23,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
+  { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard', roles: ['SUPER_ADMIN', 'ADMIN'] },
   { to: '/pos', icon: <ShoppingCart size={18} />, label: 'Punto de Venta' },
   { to: '/ventas', icon: <Receipt size={18} />, label: 'Ventas' },
   { to: '/caja', icon: <Archive size={18} />, label: 'Caja' },
+  { to: '/envios', icon: <Banknote size={18} />, label: 'Envíos de Efectivo' },
   { to: '/productos', icon: <Package size={18} />, label: 'Productos', roles: ['SUPER_ADMIN', 'ADMIN'] },
   { to: '/combos', icon: <Layers size={18} />, label: 'Combos', roles: ['SUPER_ADMIN', 'ADMIN'] },
   { to: '/categorias', icon: <ClipboardList size={18} />, label: 'Categorías', roles: ['SUPER_ADMIN', 'ADMIN'] },

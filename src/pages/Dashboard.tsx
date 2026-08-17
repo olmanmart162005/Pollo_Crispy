@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useBranch } from '../context/BranchContext'
 import { usePermissions } from '../hooks/usePermissions'
@@ -8,7 +9,7 @@ import { formatCurrency, getToday, getMonthStart, getYearStart } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import {
   TrendingUp, ShoppingBag, Users, Store, DollarSign,
-  Package, ArrowUpRight
+  Package, ArrowUpRight, Banknote
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -41,6 +42,12 @@ export default function Dashboard() {
   const { profile } = useAuth()
   const { activeBranch } = useBranch()
   const { isSuperAdmin } = usePermissions()
+
+  // Requirement 8: Cajero is not allowed in Administrative Dashboard
+  if (profile?.role === 'CAJERO') {
+    return <Navigate to="/pos" replace />
+  }
+
   const [loading, setLoading] = useState(true)
   const [todaySummary, setTodaySummary] = useState<Record<string, number>>({})
   const [monthSummary, setMonthSummary] = useState<Record<string, number>>({})
@@ -50,11 +57,9 @@ export default function Dashboard() {
   const [recentSales, setRecentSales] = useState<import('../types').Sale[]>([])
   const [paymentData, setPaymentData] = useState<{ name: string; value: number }[]>([])
 
-  const branchId = !isSuperAdmin ? (activeBranch?.id || null) : null
-
   useEffect(() => {
     loadDashboard()
-  }, [activeBranch?.id, isSuperAdmin])
+  }, [activeBranch?.id])
 
   const loadDashboard = async () => {
     setLoading(true)
@@ -62,7 +67,8 @@ export default function Dashboard() {
       const today = getToday()
       const monthStart = getMonthStart()
       const yearStart = getYearStart()
-      const effectiveBranchId = isSuperAdmin ? null : (activeBranch?.id || null)
+      // Requirement 2 & 10: Always scope to the selected activeBranch ID
+      const effectiveBranchId = activeBranch?.id || null
 
       const [todayR, monthR, yearR, monthly, recent] = await Promise.all([
         reportsService.getSummary(effectiveBranchId, today, today),

@@ -1,8 +1,8 @@
-import { Menu, Bell, ChevronDown, MapPin } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Menu, Bell, ChevronDown, MapPin, Download } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useBranch } from '../../context/BranchContext'
 import { usePermissions } from '../../hooks/usePermissions'
-import { useState } from 'react'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -13,6 +13,25 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const { branches, activeBranch, setActiveBranch } = useBranch()
   const { isSuperAdmin } = usePermissions()
   const [showBranchMenu, setShowBranchMenu] = useState(false)
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+
+  const handleInstallPWA = async () => {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null)
+    }
+  }
 
   const canSwitchBranch = isSuperAdmin || branches.length > 1
 
@@ -62,6 +81,16 @@ export default function Header({ onMenuClick }: HeaderProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {deferredPrompt && (
+          <button
+            onClick={handleInstallPWA}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold transition-all border border-red-200 shadow-sm animate-pulse"
+            title="Instalar Pollo Crispy POS en tu dispositivo"
+          >
+            <Download size={14} />
+            <span className="hidden md:inline">Instalar App</span>
+          </button>
+        )}
         <button className="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
           <Bell size={18} />
         </button>

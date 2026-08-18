@@ -1,11 +1,18 @@
-const CACHE_NAME = 'pollo-crispy-pos-v1';
+const CACHE_NAME = 'pollo-crispy-pos-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/LogoCrispyBueno.png',
+  '/favicon.ico',
+  '/favicon-16x16.png',
+  '/favicon-32x32.png',
+  '/favicon-48x48.png',
+  '/apple-touch-icon.png',
   '/pwa-192.png',
   '/pwa-512.png',
+  '/pwa-maskable-192.png',
+  '/pwa-maskable-512.png',
+  '/LogoCrispyBueno.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -31,17 +38,14 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests for navigation/static shell assets
   if (event.request.method !== 'GET') return;
   
-  // Do not intercept Supabase API or auth calls
   const url = new URL(event.request.url);
   if (url.hostname.includes('supabase.co')) return;
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Return cached asset and update in background
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { usersService } from '../services/users.service'
+import { usersService, ProfileWithBranches } from '../services/users.service'
 import { branchesService } from '../services/branches.service'
 import { useAuth } from '../context/AuthContext'
 import { useBranch } from '../context/BranchContext'
@@ -9,7 +9,7 @@ import { roleLabel, formatDate } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { Users as UsersIcon, Edit2, Search, UserCheck, UserX, UserPlus, Trash2 } from 'lucide-react'
+import { Users as UsersIcon, Edit2, Search, UserCheck, UserX, UserPlus, Trash2, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const ROLE_BADGE: Record<string, string> = {
@@ -41,7 +41,7 @@ export default function Users() {
   const { activeBranch } = useBranch()
   const { isSuperAdmin, isAdmin } = usePermissions()
 
-  const [users, setUsers] = useState<Profile[]>([])
+  const [users, setUsers] = useState<ProfileWithBranches[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -62,19 +62,20 @@ export default function Users() {
   const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [activeBranch?.id])
 
   const load = async () => {
     setLoading(true)
     try {
       const [u, b] = await Promise.all([usersService.getAll(), branchesService.getAll()])
-      setUsers(u); setBranches(b)
+      setUsers(u)
+      setBranches(b)
     } catch { toast.error('Error cargando usuarios') }
     finally { setLoading(false) }
   }
 
   const openCreateModal = (defaultRole: UserRole) => {
-    const initialBranches = !isSuperAdmin && activeBranch ? [activeBranch.id] : []
+    const initialBranches = activeBranch ? [activeBranch.id] : []
     setNewUser({
       ...INITIAL_FORM,
       role: defaultRole,
@@ -182,6 +183,14 @@ export default function Users() {
     if (!isSuperAdmin && u.role === 'SUPER_ADMIN') return false
     if (roleFilter && u.role !== roleFilter) return false
     if (search && !u.full_name.toLowerCase().includes(search.toLowerCase())) return false
+
+    // STRICT BRANCH FILTERING FOR ACTIVE BRANCH
+    if (activeBranch) {
+      const belongsToBranch = u.branch_ids?.includes(activeBranch.id)
+      const isSuper = u.role === 'SUPER_ADMIN'
+      if (!belongsToBranch && !isSuper) return false
+    }
+
     return true
   })
 
@@ -190,17 +199,22 @@ export default function Users() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
-          <UsersIcon size={22} className="text-orange-500" /> Administración de Usuarios
-        </h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
+            <UsersIcon size={22} className="text-red-600" /> Administración de Usuarios
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Mostrando usuarios de: <strong>{activeBranch?.name || 'Todas las sucursales'}</strong>
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           {isSuperAdmin && (
-            <button onClick={() => openCreateModal('ADMIN')} className="btn btn-primary">
+            <button onClick={() => openCreateModal('ADMIN')} className="btn btn-primary font-bold">
               <UserPlus size={16} /> + Nuevo Administrador
             </button>
           )}
           {isAdmin && (
-            <button onClick={() => openCreateModal('CAJERO')} className="btn btn-secondary">
+            <button onClick={() => openCreateModal('CAJERO')} className="btn btn-secondary font-bold">
               <UserPlus size={16} /> + Nuevo Cajero
             </button>
           )}
@@ -223,26 +237,56 @@ export default function Users() {
       <div className="card">
         <div className="table-wrapper">
           <table>
-            <thead><tr>
-              <th>Usuario</th><th>Rol</th><th>Estado</th><th>Registrado</th><th>Acciones</th>
-            </tr></thead>
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Sucursal(es)</th>
+                <th>Estado</th>
+                <th>Registrado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-10 text-gray-400">No se encontraron usuarios</td></tr>
+                <tr>
+                  <td colSpan={6} className="text-center py-10 text-gray-400">
+                    No se encontraron usuarios asignados a {activeBranch?.name || 'esta consulta'}.
+                  </td>
+                </tr>
               ) : filtered.map(u => (
                 <tr key={u.id} className={!u.is_active ? 'opacity-60 bg-gray-50' : ''}>
                   <td>
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0">
+                      <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0">
                         {u.full_name?.charAt(0)?.toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
+                        <p className="font-bold text-gray-900 text-sm">{u.full_name}</p>
                         {u.phone && <p className="text-xs text-gray-400">{u.phone}</p>}
                       </div>
                     </div>
                   </td>
                   <td><span className={`badge ${ROLE_BADGE[u.role]}`}>{roleLabel(u.role)}</span></td>
+                  <td className="text-xs">
+                    {u.role === 'SUPER_ADMIN' ? (
+                      <span className="badge badge-purple font-semibold">Todas</span>
+                    ) : u.branch_ids && u.branch_ids.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {u.branch_ids.map(bid => {
+                          const bObj = branches.find(b => b.id === bid)
+                          return (
+                            <span key={bid} className="badge badge-gray font-semibold flex items-center gap-1">
+                              <MapPin size={10} className="text-red-500" />
+                              {bObj?.name || 'Sucursal'}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 italic">Sin sucursal</span>
+                    )}
+                  </td>
                   <td>
                     <span className={`badge ${u.is_active ? 'badge-green' : 'badge-red'}`}>
                       {u.is_active ? 'Activo' : 'Inactivo'}

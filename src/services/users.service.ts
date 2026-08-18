@@ -4,11 +4,29 @@ import { Profile, UserRole } from '../types'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
+export type ProfileWithBranches = Profile & {
+  branch_ids?: string[]
+}
+
 export const usersService = {
-  async getAll(): Promise<Profile[]> {
-    const { data, error } = await supabase.from('profiles').select('*').order('full_name')
+  async getAll(): Promise<ProfileWithBranches[]> {
+    const { data: profiles, error } = await supabase.from('profiles').select('*').order('full_name')
     if (error) throw error
-    return (data || []) as Profile[]
+
+    const { data: userBranches } = await supabase.from('user_branches').select('user_id, branch_id')
+
+    const branchMap: Record<string, string[]> = {}
+    if (userBranches) {
+      userBranches.forEach((ub: { user_id: string; branch_id: string }) => {
+        if (!branchMap[ub.user_id]) branchMap[ub.user_id] = []
+        branchMap[ub.user_id].push(ub.branch_id)
+      })
+    }
+
+    return (profiles || []).map((p: Profile) => ({
+      ...p,
+      branch_ids: branchMap[p.id] || [],
+    })) as ProfileWithBranches[]
   },
 
   async updateProfile(id: string, updates: Partial<Profile>): Promise<void> {

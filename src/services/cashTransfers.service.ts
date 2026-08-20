@@ -51,6 +51,23 @@ export const cashTransfersService = {
       throw new Error('El monto del envío debe ser mayor a L 0.00.')
     }
 
+    // Attempt RPC creation first for security & atomic logging
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('create_cash_transfer', {
+      p_branch_id: params.branchId,
+      p_cash_register_id: params.cashRegisterId || null,
+      p_sender_id: params.senderId,
+      p_recipient_name: params.recipientName.trim(),
+      p_amount: params.amount,
+      p_reason: params.reason?.trim() || 'Retiro de efectivo / Depósito',
+      p_notes: params.notes?.trim() || null,
+      p_authorized_by: params.authorizedBy || null,
+    })
+
+    if (!rpcErr && rpcData?.id) {
+      return rpcData as unknown as CashTransfer
+    }
+
+    // Direct table insert fallback
     const { data, error } = await supabase
       .from('cash_transfers')
       .insert({

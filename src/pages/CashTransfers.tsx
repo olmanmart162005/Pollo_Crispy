@@ -4,21 +4,25 @@ import { useBranch } from '../context/BranchContext'
 import { usePermissions } from '../hooks/usePermissions'
 import { cashTransfersService } from '../services/cashTransfers.service'
 import { cashService } from '../services/cash.service'
-import { CashTransfer, CashRegisterRecord } from '../types'
+import { branchesService } from '../services/branches.service'
+import { CashTransfer, CashRegisterRecord, Branch } from '../types'
 import { formatCurrency, formatDateTime, getToday } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
-import { Banknote, Plus, Search, Filter, CheckCircle, ArrowUpRight, DollarSign, Calendar, UserCheck } from 'lucide-react'
+import { Banknote, Plus, Search, CheckCircle, ArrowUpRight, DollarSign, Calendar, UserCheck, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function CashTransfers() {
   const { profile } = useAuth()
-  const { activeBranch } = useBranch()
+  const { activeBranch, branches } = useBranch()
   const { isSuperAdmin } = usePermissions()
 
   const [transfers, setTransfers] = useState<CashTransfer[]>([])
   const [loading, setLoading] = useState(true)
   const [openRegister, setOpenRegister] = useState<CashRegisterRecord | null>(null)
+
+  // Branch filter state (defaults to activeBranch.id)
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(activeBranch?.id || '')
 
   // Filters
   const [startDate, setStartDate] = useState(getToday())
@@ -27,28 +31,37 @@ export default function CashTransfers() {
 
   // Create Modal state
   const [showModal, setShowModal] = useState(false)
+  const [targetBranchId, setTargetBranchId] = useState<string>(activeBranch?.id || '')
   const [recipientName, setRecipientName] = useState('')
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('Retiro de efectivo / Depósito')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const effectiveBranchId = !isSuperAdmin ? (activeBranch?.id || undefined) : (activeBranch?.id || undefined)
+  // Sync selectedBranchId when activeBranch changes in top header
+  useEffect(() => {
+    if (activeBranch?.id) {
+      setSelectedBranchId(activeBranch.id)
+      setTargetBranchId(activeBranch.id)
+    }
+  }, [activeBranch?.id])
 
   useEffect(() => {
     loadData()
-  }, [activeBranch?.id, startDate, endDate])
+  }, [selectedBranchId, startDate, endDate])
 
   const loadData = async () => {
     setLoading(true)
     try {
+      const branchIdToQuery = selectedBranchId || (activeBranch?.id || undefined)
+
       const [transfersData, openReg] = await Promise.all([
         cashTransfersService.getTransfers({
-          branchId: effectiveBranchId,
+          branchId: branchIdToQuery,
           startDate,
           endDate,
         }),
-        profile ? cashService.getOpenRegister(profile.id, activeBranch?.id) : Promise.resolve(null)
+        profile ? cashService.getOpenRegister(profile.id, branchIdToQuery) : Promise.resolve(null)
       ])
 
       setTransfers(transfersData)
@@ -61,8 +74,16 @@ export default function CashTransfers() {
     }
   }
 
+  const handleOpenModal = () => {
+    setTargetBranchId(selectedBranchId || activeBranch?.id || (branches[0]?.id || ''))
+    setShowModal(true)
+  }
+
   const handleCreateTransfer = async () => {
-    if (!profile || !activeBranch) return
+    if (!profile) return toast.error('Sesión no encontrada')
+    const postingBranchId = targetBranchId || activeBranch?.id
+    if (!postingBranchId) return toast.error('Selecciona una sucursal para el envío')
+
     const numAmount = parseFloat(amount)
 
     if (!recipientName.trim()) {
@@ -76,9 +97,12 @@ export default function CashTransfers() {
 
     setSubmitting(true)
     try {
+      // Find open register for the target branch
+      const reg = openRegister || (await cashService.getOpenRegister(profile.id, postingBranchId))
+
       await cashTransfersService.createTransfer({
-        branchId: activeBranch.id,
-        cashRegisterId: openRegister?.id,
+        branchId: postingBranchId,
+        cashRegisterId: reg?.id,
         senderId: profile.id,
         recipientName: recipientName.trim(),
         amount: numAmount,
@@ -86,7 +110,8 @@ export default function CashTransfers() {
         notes: notes.trim() || undefined,
       })
 
-      toast.success(`Envío de ${formatCurrency(numAmount, 'L')} registrado correctamente`)
+      const bName = branches.find(b => b.id === postingBranchId)?.name || activeBranch?.name || ''
+      toast.success(`Envío de ${formatCurrency(numAmount, 'L')} registrado en ${bName}`)
       setShowModal(false)
       setRecipientName('')
       setAmount('')
@@ -111,6 +136,7 @@ export default function CashTransfers() {
   })
 
   const totalTransferredToday = filteredTransfers.reduce((sum, t) => sum + (t.status === 'confirmed' ? Number(t.amount) : 0), 0)
+  const currentBranchObj = branches.find(b => b.id === selectedBranchId) || activeBranch
 
   if (loading) return <PageLoader />
 
@@ -123,12 +149,12 @@ export default function CashTransfers() {
             <Banknote size={26} className="text-red-600" /> Envíos / Retiros de Efectivo
           </h1>
           <p className="text-gray-500 text-xs mt-0.5">
-            Registro de dinero retirado físicamente de caja en {activeBranch?.name || 'la sucursal'}
+            Registro de dinero retirado físicamente de caja en: <strong>{currentBranchObj?.name || 'Todas las sucursales'}</strong>
           </p>
         </div>
 
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleOpenModal}
           className="btn btn-primary font-bold shadow-md hover:shadow-lg"
         >
           <Plus size={18} /> Registrar Nuevo Envío
@@ -162,8 +188,8 @@ export default function CashTransfers() {
             <UserCheck size={24} />
           </div>
           <div>
-            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Turno Actual</p>
-            <p className="text-sm font-bold text-gray-900">
+            <p className="text-xs text-gray-500 font-bold uppercase tracking-wider">Turno Actual ({currentBranchObj?.name || 'Sucursal'})</p>
+            <p className="text-sm font-bold text-gray-900 truncate">
               {openRegister ? `Caja de ${openRegister.cashier_name}` : 'Sin turno de caja abierto'}
             </p>
           </div>
@@ -172,11 +198,27 @@ export default function CashTransfers() {
 
       {/* Filters bar */}
       <div className="card p-4 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-56">
+        {/* Branch Filter Selector */}
+        <div className="flex items-center gap-2">
+          <MapPin size={16} className="text-red-600" />
+          <span className="text-xs font-bold text-gray-700">Sucursal:</span>
+          <select
+            className="select text-xs w-48 font-bold"
+            value={selectedBranchId}
+            onChange={e => setSelectedBranchId(e.target.value)}
+          >
+            {isSuperAdmin && <option value="">Todas las sucursales</option>}
+            {branches.map(b => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="relative flex-1 min-w-48">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            className="input pl-9"
+            className="input pl-9 text-xs"
             placeholder="Buscar por recibido, enviado o motivo..."
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -225,7 +267,7 @@ export default function CashTransfers() {
                 <tr>
                   <td colSpan={7} className="text-center py-12 text-gray-400">
                     <Banknote size={40} className="mx-auto mb-2 opacity-20 text-red-500" />
-                    <p className="text-sm font-medium">No se han registrado envíos de efectivo en el período seleccionado.</p>
+                    <p className="text-sm font-medium">No se han registrado envíos de efectivo en {currentBranchObj?.name || 'las sucursales'}.</p>
                   </td>
                 </tr>
               ) : (
@@ -234,8 +276,11 @@ export default function CashTransfers() {
                     <td className="text-xs font-medium whitespace-nowrap">
                       {formatDateTime(transfer.created_at)}
                     </td>
-                    <td className="text-xs font-bold text-gray-800">
-                      {transfer.branch_name || activeBranch?.name}
+                    <td className="text-xs font-bold text-gray-900">
+                      <span className="badge badge-gray flex items-center gap-1 w-fit font-bold">
+                        <MapPin size={10} className="text-red-600" />
+                        {transfer.branch_name || currentBranchObj?.name}
+                      </span>
                     </td>
                     <td className="text-xs font-semibold text-gray-700">
                       {transfer.sender_name || 'Cajero'}
@@ -295,6 +340,19 @@ export default function CashTransfers() {
             <p>
               El dinero retirado se descontará del <strong>Efectivo Esperado en Caja</strong>, pero las ventas totales se mantendrán intactas.
             </p>
+          </div>
+
+          <div className="form-group">
+            <label className="label">Sucursal del Envío *</label>
+            <select
+              className="select font-bold text-gray-900"
+              value={targetBranchId}
+              onChange={e => setTargetBranchId(e.target.value)}
+            >
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group">

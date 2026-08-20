@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react'
 import { useBranch } from '../context/BranchContext'
 import { usePermissions } from '../hooks/usePermissions'
 import { reportsService } from '../services/reports.service'
+import { salesService } from '../services/sales.service'
 import { cashTransfersService } from '../services/cashTransfers.service'
 import { cashService } from '../services/cash.service'
-import { CashTransfer, CashRegisterRecord } from '../types'
-import { formatCurrency, getToday, getMonthStart } from '../utils'
+import { Sale, CashTransfer, CashRegisterRecord } from '../types'
+import {
+  formatCurrency, formatDateTime, getToday, getWeekStart, getMonthStart, getYearStart,
+  paymentMethodLabel, saleStatusLabel
+} from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import { generateReport, printReport } from '../utils/pdfReport'
 import {
-  BarChart3, TrendingUp, Download, Printer, FileText, RefreshCw
+  BarChart3, TrendingUp, Download, Printer, FileText, RefreshCw, Calendar
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -24,11 +28,12 @@ export default function Reports() {
   const { isSuperAdmin } = usePermissions()
   const [loading, setLoading] = useState(true)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [startDate, setStartDate] = useState(getMonthStart())
+  const [startDate, setStartDate] = useState(getToday())
   const [endDate, setEndDate] = useState(getToday())
   const [activeReport, setActiveReport] = useState<ReportType>('ventas')
 
   const [summary, setSummary] = useState<Record<string, number>>({})
+  const [salesList, setSalesList] = useState<Sale[]>([])
   const [topProducts, setTopProducts] = useState<{ name: string; quantity: number; revenue: number }[]>([])
   const [topCombos, setTopCombos] = useState<{ name: string; quantity: number; revenue: number }[]>([])
   const [dailySales, setDailySales] = useState<{ sale_date: string; total_amount: number; total_sales: number }[]>([])
@@ -46,8 +51,9 @@ export default function Reports() {
     setLoading(true)
     try {
       const now = new Date()
-      const [s, tp, tc, ds, cs, bs, trs, regs] = await Promise.all([
+      const [s, sales, tp, tc, ds, cs, bs, trs, regs] = await Promise.all([
         reportsService.getSummary(branchId, startDate, endDate),
+        salesService.getSales({ branchId: branchId || undefined, startDate, endDate }),
         reportsService.getTopProducts(branchId, startDate, endDate, 10),
         reportsService.getTopCombos(branchId, startDate, endDate, 10),
         reportsService.getDailySales(branchId, now.getFullYear(), now.getMonth() + 1),
@@ -57,6 +63,7 @@ export default function Reports() {
         cashService.getRegisters({ branchId: branchId || undefined, limit: 30 }),
       ])
       setSummary(s || {})
+      setSalesList(sales || [])
       setTopProducts((tp || []).map((p: Record<string, unknown>) => ({ name: p.name as string, quantity: Number(p.quantity), revenue: Number(p.revenue) })))
       setTopCombos((tc || []).map((c: Record<string, unknown>) => ({ name: c.name as string, quantity: Number(c.quantity), revenue: Number(c.revenue) })))
       setDailySales((ds || []).map((d: Record<string, unknown>) => ({ sale_date: d.sale_date as string, total_amount: Number(d.total_amount), total_sales: Number(d.total_sales) })))
@@ -72,51 +79,61 @@ export default function Reports() {
 
   const handleFilter = () => loadReports()
 
+  // Presets de filtro rápido
+  const setPresetDate = (type: 'today' | 'week' | 'month' | 'year') => {
+    const today = getToday()
+    if (type === 'today') {
+      setStartDate(today)
+      setEndDate(today)
+    } else if (type === 'week') {
+      setStartDate(getWeekStart())
+      setEndDate(today)
+    } else if (type === 'month') {
+      setStartDate(getMonthStart())
+      setEndDate(today)
+    } else if (type === 'year') {
+      setStartDate(getYearStart())
+      setEndDate(today)
+    }
+  }
+
   // ── PDF / Impresión ──────────────────────────────────────────
   const getReportData = () => {
     switch (activeReport) {
-      case 'ventas':
+      case 'ventas': {
+        const completedSales = salesList.filter(s => s.status === 'completed')
+        const totalAmount = completedSales.reduce((sum, s) => sum + (Number(s.total) || 0), 0)
+        const totalDiscount = completedSales.reduce((sum, s) => sum + (Number(s.discount_amount) || 0), 0)
+        const avgSale = completedSales.length > 0 ? totalAmount / completedSales.length : 0
+
         return {
-          title: 'Reporte de Ventas',
+          title: 'Historial de Ventas',
           columns: [
-            { header: 'Método de Pago', dataKey: 'metodo', align: 'left' as const },
-            { header: 'N° Transacciones', dataKey: 'transacciones', align: 'center' as const, width: 40 },
-            { header: 'Total', dataKey: 'total', align: 'right' as const, width: 45 },
-            { header: '% del Total', dataKey: 'porcentaje', align: 'right' as const, width: 35 },
+            { header: 'N° Venta', dataKey: 'numero', align: 'left' as const, width: 35 },
+            { header: 'Fecha y Hora', dataKey: 'fecha', align: 'left' as const, width: 45 },
+            { header: 'Sucursal', dataKey: 'sucursal', align: 'left' as const },
+            { header: 'Cajero', dataKey: 'cajero', align: 'left' as const },
+            { header: 'Método', dataKey: 'metodo', align: 'center' as const, width: 32 },
+            { header: 'Estado', dataKey: 'estado', align: 'center' as const, width: 30 },
+            { header: 'Total', dataKey: 'total', align: 'right' as const, width: 40 },
           ],
-          rows: [
-            {
-              metodo: 'Efectivo',
-              transacciones: Number(summary.cash_sales || 0),
-              total: formatCurrency(Number(summary.cash_amount || 0), 'L'),
-              porcentaje: summary.total_amount ? `${((Number(summary.cash_amount || 0) / Number(summary.total_amount)) * 100).toFixed(1)}%` : '0%',
-            },
-            {
-              metodo: 'Tarjeta',
-              transacciones: Number(summary.card_sales || 0),
-              total: formatCurrency(Number(summary.card_amount || 0), 'L'),
-              porcentaje: summary.total_amount ? `${((Number(summary.card_amount || 0) / Number(summary.total_amount)) * 100).toFixed(1)}%` : '0%',
-            },
-            {
-              metodo: 'Transferencia',
-              transacciones: Number(summary.transfer_sales || 0),
-              total: formatCurrency(Number(summary.transfer_amount || 0), 'L'),
-              porcentaje: summary.total_amount ? `${((Number(summary.transfer_amount || 0) / Number(summary.total_amount)) * 100).toFixed(1)}%` : '0%',
-            },
-            {
-              metodo: 'Otro',
-              transacciones: Number(summary.other_sales || 0),
-              total: formatCurrency(Number(summary.other_amount || 0), 'L'),
-              porcentaje: summary.total_amount ? `${((Number(summary.other_amount || 0) / Number(summary.total_amount)) * 100).toFixed(1)}%` : '0%',
-            },
-          ],
+          rows: salesList.map(s => ({
+            numero: s.sale_number,
+            fecha: formatDateTime(s.created_at),
+            sucursal: s.branch_name || '—',
+            cajero: s.cashier_name || '—',
+            metodo: paymentMethodLabel(s.payment_method),
+            estado: saleStatusLabel(s.status),
+            total: formatCurrency(s.total, 'L'),
+          })),
           summary: [
-            { label: 'Total de Transacciones', value: String(Number(summary.total_sales || 0)) },
-            { label: 'Descuentos Aplicados', value: formatCurrency(Number(summary.total_discount || 0), 'L') },
-            { label: 'Ticket Promedio', value: formatCurrency(Number(summary.avg_sale || 0), 'L') },
-            { label: 'INGRESOS TOTALES', value: formatCurrency(Number(summary.total_amount || 0), 'L'), bold: true },
+            { label: 'Total de Transacciones Completadas', value: String(completedSales.length) },
+            { label: 'Descuentos Aplicados', value: formatCurrency(totalDiscount, 'L') },
+            { label: 'Ticket Promedio', value: formatCurrency(avgSale, 'L') },
+            { label: 'INGRESOS TOTALES DEL PERÍODO', value: formatCurrency(totalAmount, 'L'), bold: true },
           ],
         }
+      }
 
       case 'top_productos':
         return {
@@ -200,7 +217,7 @@ export default function Reports() {
 
       case 'metodos_pago':
         return {
-          title: 'Ventas por Método de Pago',
+          title: 'Resumen por Método de Pago',
           columns: [
             { header: 'Método', dataKey: 'metodo', align: 'left' as const },
             { header: 'Total', dataKey: 'total', align: 'right' as const, width: 50 },
@@ -275,8 +292,6 @@ export default function Reports() {
     setPdfLoading(true)
     try {
       const data = getReportData()
-      const today = new Date()
-      const dateTag = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`
       const filename = `Reporte_${data.title.replace(/\s+/g, '_')}_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}.pdf`
 
       await generateReport(
@@ -321,29 +336,92 @@ export default function Reports() {
   if (loading) return <PageLoader />
 
   const REPORT_TABS: { id: ReportType; label: string }[] = [
-    { id: 'ventas', label: '💰 Ventas' },
+    { id: 'ventas', label: '📋 Historial de Ventas' },
     { id: 'envios', label: '💸 Envíos de Efectivo' },
     { id: 'cierre_caja', label: '🏦 Cierres de Caja' },
     { id: 'top_productos', label: '🍗 Top Productos' },
     { id: 'top_combos', label: '🍱 Top Combos' },
     { id: 'cajeros', label: '👤 Por Cajero' },
     ...(isSuperAdmin ? [{ id: 'sucursales' as ReportType, label: '🏠 Por Sucursal' }] : []),
-    { id: 'metodos_pago', label: '💳 Métodos de Pago' },
+    { id: 'metodos_pago', label: '💳 Resumen Métodos' },
   ]
+
+  const todayStr = getToday()
+  const isToday = startDate === todayStr && endDate === todayStr
+  const isWeek = startDate === getWeekStart() && endDate === todayStr
+  const isMonth = startDate === getMonthStart() && endDate === todayStr
+  const isYear = startDate === getYearStart() && endDate === todayStr
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Encabezado */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
-          <BarChart3 size={22} className="text-orange-500" /> Reportes
-        </h1>
-        <div className="flex flex-wrap gap-2 items-center">
-          <input type="date" className="input w-40" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <span className="text-gray-400 text-sm">a</span>
-          <input type="date" className="input w-40" value={endDate} onChange={e => setEndDate(e.target.value)} />
-          <button onClick={handleFilter} className="btn btn-primary">
-            <RefreshCw size={14} /> Consultar
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
+            <BarChart3 size={24} className="text-red-600" /> Reportes de Ventas
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Consulta el historial, exporta informes en PDF y analiza el rendimiento por período.
+          </p>
+        </div>
+
+        {/* Filtros de Fecha */}
+        <div className="flex flex-wrap gap-2 items-center bg-white p-2 rounded-2xl border border-gray-200 shadow-sm">
+          {/* Botones Rápidos de Período */}
+          <div className="flex gap-1 border-r border-gray-200 pr-2 mr-1">
+            <button
+              onClick={() => setPresetDate('today')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                isToday ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100 hover:text-red-700'
+              }`}
+            >
+              Hoy (Día)
+            </button>
+            <button
+              onClick={() => setPresetDate('week')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                isWeek ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100 hover:text-red-700'
+              }`}
+            >
+              Esta Semana
+            </button>
+            <button
+              onClick={() => setPresetDate('month')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                isMonth ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100 hover:text-red-700'
+              }`}
+            >
+              Este Mes
+            </button>
+            <button
+              onClick={() => setPresetDate('year')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                isYear ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100 hover:text-red-700'
+              }`}
+            >
+              Este Año
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
+            <Calendar size={14} className="text-amber-500" />
+            <input
+              type="date"
+              className="input py-1 text-xs w-32 border-gray-200"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+            />
+            <span>a</span>
+            <input
+              type="date"
+              className="input py-1 text-xs w-32 border-gray-200"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+            />
+          </div>
+
+          <button onClick={handleFilter} className="btn btn-primary btn-sm bg-red-600 hover:bg-red-700 border-red-600">
+            <RefreshCw size={13} /> Consultar
           </button>
         </div>
       </div>
@@ -351,13 +429,13 @@ export default function Reports() {
       {/* Summary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total ventas', value: Number(summary.total_sales || 0), fmt: false, color: 'bg-blue-100 text-blue-600' },
-          { label: 'Ingresos totales', value: Number(summary.total_amount || 0), fmt: true, color: 'bg-orange-100 text-orange-600' },
-          { label: 'Ticket promedio', value: Number(summary.avg_sale || 0), fmt: true, color: 'bg-green-100 text-green-600' },
-          { label: 'Descuentos', value: Number(summary.total_discount || 0), fmt: true, color: 'bg-red-100 text-red-600' },
+          { label: 'Total ventas', value: Number(summary.total_sales || 0), fmt: false, color: 'bg-red-50 border-red-200 text-red-600' },
+          { label: 'Ingresos totales', value: Number(summary.total_amount || 0), fmt: true, color: 'bg-amber-50 border-amber-200 text-amber-600' },
+          { label: 'Ticket promedio', value: Number(summary.avg_sale || 0), fmt: true, color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+          { label: 'Descuentos', value: Number(summary.total_discount || 0), fmt: true, color: 'bg-rose-50 border-rose-200 text-rose-600' },
         ].map(s => (
-          <div key={s.label} className="card p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">{s.label}</p>
+          <div key={s.label} className={`card p-4 border ${s.color}`}>
+            <p className="text-xs uppercase tracking-wide font-bold">{s.label}</p>
             <p className="text-2xl font-bold text-gray-900 font-display mt-1">
               {s.fmt ? formatCurrency(s.value, 'L') : s.value}
             </p>
@@ -365,26 +443,74 @@ export default function Reports() {
         ))}
       </div>
 
-      {/* Métodos de pago */}
-      <div className="card card-body">
-        <h2 className="font-bold text-gray-900 font-display mb-3 flex items-center gap-2">
-          <TrendingUp size={16} className="text-orange-500" /> Ventas por Método de Pago
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: 'Efectivo', value: Number(summary.cash_amount || 0), color: 'border-green-400' },
-            { label: 'Tarjeta', value: Number(summary.card_amount || 0), color: 'border-blue-400' },
-            { label: 'Transferencia', value: Number(summary.transfer_amount || 0), color: 'border-purple-400' },
-            { label: 'Otro', value: Number(summary.other_amount || 0), color: 'border-gray-400' },
-          ].map(p => (
-            <div key={p.label} className={`bg-gray-50 rounded-xl p-3 border-l-4 ${p.color}`}>
-              <p className="text-xs text-gray-500 font-medium">{p.label}</p>
-              <p className="font-bold text-gray-900 mt-0.5">{formatCurrency(p.value, 'L')}</p>
-              <p className="text-xs text-gray-400">
-                {summary.total_amount ? ((p.value / Number(summary.total_amount)) * 100).toFixed(1) : 0}%
+      {/* ══ SECCIÓN EXPORTACIÓN Y SELECCIÓN DE REPORTE ══════════════ */}
+      <div className="card border border-amber-200 shadow-sm">
+        <div className="card-header bg-gradient-to-r from-red-600 to-amber-500 text-white rounded-t-2xl">
+          <h2 className="font-bold text-white font-display flex items-center gap-2">
+            <FileText size={18} />
+            Exportar Reporte PDF — {getReportData().title}
+          </h2>
+          <span className="text-xs bg-amber-400 text-red-950 font-bold px-2 py-0.5 rounded-full ml-auto">
+            Pollo Crispy
+          </span>
+        </div>
+        <div className="card-body">
+          <p className="text-sm text-gray-600 mb-4">
+            Selecciona el tipo de reporte. El informe PDF se generará con los colores oficiales (Rojo y Amarillo),
+            logo de Pollo Crispy y el desglose correspondiente al período <strong>{startDate}</strong> a <strong>{endDate}</strong>.
+          </p>
+
+          {/* Tabs de tipo de reporte */}
+          <div className="flex flex-wrap gap-2 mb-5">
+            {REPORT_TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveReport(tab.id)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                  activeReport === tab.id
+                    ? 'bg-red-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-yellow-100 hover:text-red-700 border border-gray-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Vista previa del reporte seleccionado */}
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mb-5 flex flex-wrap justify-between items-center gap-3">
+            <div>
+              <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-0.5">Vista Previa del Reporte PDF</p>
+              <p className="text-base font-bold text-gray-900">{getReportData().title}</p>
+              <p className="text-xs text-gray-600 mt-0.5">
+                Total de registros: <strong>{getReportData().rows.length}</strong> · Período: <strong>{startDate}</strong> al <strong>{endDate}</strong>
               </p>
             </div>
-          ))}
+            {/* Botones de acción */}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleGeneratePdf}
+                disabled={pdfLoading}
+                className="btn bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-sm"
+              >
+                {pdfLoading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Download size={16} />
+                )}
+                {pdfLoading ? 'Generando...' : '📄 Descargar PDF'}
+              </button>
+
+              <button
+                onClick={handlePrint}
+                disabled={pdfLoading}
+                className="btn bg-amber-500 hover:bg-amber-600 text-white border-amber-500 shadow-sm"
+              >
+                <Printer size={16} />
+                🖨️ Imprimir
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -401,13 +527,14 @@ export default function Reports() {
                 <XAxis dataKey="sale_date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={d => d.slice(5)} />
                 <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={v => `L${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(v: number) => [formatCurrency(v, 'L'), 'Ventas']} contentStyle={{ borderRadius: '12px', fontSize: '12px' }} />
-                <Line type="monotone" dataKey="total_amount" stroke="#f97316" strokeWidth={2} dot={{ fill: '#f97316', r: 3 }} />
+                <Line type="monotone" dataKey="total_amount" stroke="#dc2626" strokeWidth={2} dot={{ fill: '#dc2626', r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
+      {/* Desglose visual por productos y combos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top productos */}
         {topProducts.length > 0 && (
@@ -421,7 +548,7 @@ export default function Reports() {
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110}
                     tickFormatter={n => n.length > 16 ? n.slice(0, 15) + '...' : n} />
                   <Tooltip formatter={(v: number) => [v, 'Unidades']} contentStyle={{ borderRadius: '12px', fontSize: '12px' }} />
-                  <Bar dataKey="quantity" fill="#f97316" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="quantity" fill="#dc2626" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -435,142 +562,24 @@ export default function Reports() {
             <div className="card-body space-y-3">
               {topCombos.slice(0, 5).map((c, i) => (
                 <div key={c.name} className="flex items-center gap-3">
-                  <span className="w-6 h-6 bg-orange-100 text-orange-700 rounded-full text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                  <span className="w-6 h-6 bg-red-100 text-red-700 rounded-full text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-800 truncate">{c.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                        <div className="bg-orange-400 h-1.5 rounded-full" style={{ width: `${(c.quantity / topCombos[0].quantity) * 100}%` }} />
+                        <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: `${(c.quantity / topCombos[0].quantity) * 100}%` }} />
                       </div>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-xs font-bold text-gray-900">{c.quantity} uds.</p>
-                    <p className="text-xs text-orange-600">{formatCurrency(c.revenue, 'L')}</p>
+                    <p className="text-xs text-red-600 font-bold">{formatCurrency(c.revenue, 'L')}</p>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
-
-      {/* Por cajero */}
-      {cashierSales.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="font-bold text-gray-900 font-display">Ventas por Cajero</h2>
-          </div>
-          <div className="table-wrapper rounded-none border-0">
-            <table>
-              <thead><tr><th>Cajero</th><th>N° Ventas</th><th>Total</th></tr></thead>
-              <tbody>
-                {cashierSales.map(c => (
-                  <tr key={c.cashier_name}>
-                    <td className="font-medium">{c.cashier_name}</td>
-                    <td>{c.total_sales}</td>
-                    <td className="font-bold">{formatCurrency(c.total_amount, 'L')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Por sucursal */}
-      {isSuperAdmin && branchSales.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="font-bold text-gray-900 font-display">Ventas por Sucursal</h2>
-          </div>
-          <div className="table-wrapper rounded-none border-0">
-            <table>
-              <thead><tr><th>Sucursal</th><th>N° Ventas</th><th>Total</th></tr></thead>
-              <tbody>
-                {branchSales.map(b => (
-                  <tr key={b.branch_name}>
-                    <td className="font-medium">{b.branch_name}</td>
-                    <td>{b.total_sales}</td>
-                    <td className="font-bold">{formatCurrency(b.total_amount, 'L')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ══ SECCIÓN PDF ══════════════════════════════════════════════ */}
-      <div className="card">
-        <div className="card-header">
-          <h2 className="font-bold text-gray-900 font-display flex items-center gap-2">
-            <FileText size={18} className="text-orange-500" />
-            Exportar Reporte PDF
-          </h2>
-        </div>
-        <div className="card-body">
-          <p className="text-sm text-gray-500 mb-4">
-            Selecciona el tipo de reporte y genera un PDF horizontal con logo, tablas y totales.
-            Los datos corresponden al período seleccionado: <strong>{startDate}</strong> → <strong>{endDate}</strong>
-          </p>
-
-          {/* Tabs de tipo de reporte */}
-          <div className="flex flex-wrap gap-2 mb-5">
-            {REPORT_TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveReport(tab.id)}
-                className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  activeReport === tab.id
-                    ? 'bg-orange-500 text-white shadow-sm'
-                    : 'bg-gray-100 text-gray-600 hover:bg-orange-50 hover:text-orange-600'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Vista previa del reporte seleccionado */}
-          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-5">
-            <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide mb-1">Reporte seleccionado</p>
-            <p className="text-sm font-bold text-gray-900">{getReportData().title}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              {getReportData().rows.length} filas · {startDate} → {endDate}
-            </p>
-          </div>
-
-          {/* Botones de acción */}
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handleGeneratePdf}
-              disabled={pdfLoading}
-              className="btn btn-primary"
-            >
-              {pdfLoading ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <Download size={16} />
-              )}
-              {pdfLoading ? 'Generando...' : '📄 Descargar PDF'}
-            </button>
-
-            <button
-              onClick={handlePrint}
-              disabled={pdfLoading}
-              className="btn btn-secondary"
-            >
-              <Printer size={16} />
-              🖨️ Imprimir
-            </button>
-          </div>
-
-          <p className="text-xs text-gray-400 mt-3">
-            El PDF se genera en formato horizontal (A4 landscape) con logo de Pollo Crispy,
-            encabezado, tabla de datos y resumen de totales.
-          </p>
-        </div>
       </div>
     </div>
   )

@@ -11,9 +11,10 @@ import {
   paymentMethodLabel, saleStatusLabel
 } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
-import { generateReport, printReport } from '../utils/pdfReport'
+import Modal from '../components/ui/Modal'
+import { generateReport, printReport, createReportPdfBlobUrl } from '../utils/pdfReport'
 import {
-  BarChart3, TrendingUp, Download, Printer, FileText, RefreshCw, Calendar
+  BarChart3, TrendingUp, Download, Printer, FileText, RefreshCw, Calendar, Eye, X
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -31,6 +32,10 @@ export default function Reports() {
   const [startDate, setStartDate] = useState(getToday())
   const [endDate, setEndDate] = useState(getToday())
   const [activeReport, setActiveReport] = useState<ReportType>('ventas')
+
+  // Estado para la Modal de Vista Previa de PDF real
+  const [pdfModalOpen, setPdfModalOpen] = useState(false)
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null)
 
   const [summary, setSummary] = useState<Record<string, number>>({})
   const [salesList, setSalesList] = useState<Sale[]>([])
@@ -97,7 +102,7 @@ export default function Reports() {
     }
   }
 
-  // ── PDF / Impresión ──────────────────────────────────────────
+  // ── Preparar Datos del Reporte ─────────────────────────────
   const getReportData = () => {
     switch (activeReport) {
       case 'ventas': {
@@ -333,6 +338,26 @@ export default function Reports() {
     }
   }
 
+  const handleOpenPdfModal = async () => {
+    setPdfLoading(true)
+    try {
+      const data = getReportData()
+      const url = await createReportPdfBlobUrl(
+        { title: data.title, startDate, endDate, branchName },
+        data.columns,
+        data.rows as Record<string, string | number>[],
+        data.summary
+      )
+      setPdfBlobUrl(url)
+      setPdfModalOpen(true)
+    } catch (err) {
+      console.error(err)
+      toast.error('Error al preparar vista previa del PDF')
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
   if (loading) return <PageLoader />
 
   const REPORT_TABS: { id: ReportType; label: string }[] = [
@@ -351,6 +376,8 @@ export default function Reports() {
   const isWeek = startDate === getWeekStart() && endDate === todayStr
   const isMonth = startDate === getMonthStart() && endDate === todayStr
   const isYear = startDate === getYearStart() && endDate === todayStr
+
+  const currentReportData = getReportData()
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -443,21 +470,20 @@ export default function Reports() {
         ))}
       </div>
 
-      {/* ══ SECCIÓN EXPORTACIÓN Y SELECCIÓN DE REPORTE ══════════════ */}
+      {/* ══ SECCIÓN DE EXPORTACIÓN Y VISTA PREVIA INTERACTIVA ══════════════ */}
       <div className="card border border-amber-200 shadow-sm">
-        <div className="card-header bg-gradient-to-r from-red-600 to-amber-500 text-white rounded-t-2xl">
+        <div className="card-header bg-gradient-to-r from-red-600 to-amber-500 text-white rounded-t-2xl flex items-center justify-between">
           <h2 className="font-bold text-white font-display flex items-center gap-2">
             <FileText size={18} />
-            Exportar Reporte PDF — {getReportData().title}
+            Exportar e Inspeccionar Reporte PDF — {currentReportData.title}
           </h2>
-          <span className="text-xs bg-amber-400 text-red-950 font-bold px-2 py-0.5 rounded-full ml-auto">
+          <span className="text-xs bg-amber-400 text-red-950 font-bold px-2.5 py-0.5 rounded-full">
             Pollo Crispy
           </span>
         </div>
         <div className="card-body">
           <p className="text-sm text-gray-600 mb-4">
-            Selecciona el tipo de reporte. El informe PDF se generará con los colores oficiales (Rojo y Amarillo),
-            logo de Pollo Crispy y el desglose correspondiente al período <strong>{startDate}</strong> a <strong>{endDate}</strong>.
+            Selecciona la pestaña para cambiar el reporte. A continuación puedes ver la <strong>Vista Previa del Documento</strong> exactamente con los colores de marca (Rojo y Amarillo), columnas y totales correspondientes al período del <strong>{startDate}</strong> al <strong>{endDate}</strong>.
           </p>
 
           {/* Tabs de tipo de reporte */}
@@ -477,26 +503,33 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* Vista previa del reporte seleccionado */}
-          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mb-5 flex flex-wrap justify-between items-center gap-3">
-            <div>
-              <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-0.5">Vista Previa del Reporte PDF</p>
-              <p className="text-base font-bold text-gray-900">{getReportData().title}</p>
-              <p className="text-xs text-gray-600 mt-0.5">
-                Total de registros: <strong>{getReportData().rows.length}</strong> · Período: <strong>{startDate}</strong> al <strong>{endDate}</strong>
-              </p>
+          {/* Barra de Acciones Principales */}
+          <div className="flex flex-wrap justify-between items-center gap-3 bg-amber-50 border border-amber-300 rounded-xl p-3 mb-5">
+            <div className="text-xs text-gray-700">
+              <span className="font-bold text-red-700 uppercase tracking-wide">Reporte Activo:</span>{' '}
+              <strong className="text-gray-900">{currentReportData.title}</strong> · Registros:{' '}
+              <strong>{currentReportData.rows.length}</strong>
             </div>
-            {/* Botones de acción */}
+
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleOpenPdfModal}
+                disabled={pdfLoading}
+                className="btn bg-gray-800 hover:bg-black text-white border-gray-800 text-xs shadow-sm"
+              >
+                <Eye size={14} />
+                👁️ Vista Previa Documento PDF
+              </button>
+
               <button
                 onClick={handleGeneratePdf}
                 disabled={pdfLoading}
-                className="btn bg-red-600 hover:bg-red-700 text-white border-red-600 shadow-sm"
+                className="btn bg-red-600 hover:bg-red-700 text-white border-red-600 text-xs shadow-sm"
               >
                 {pdfLoading ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <Download size={16} />
+                  <Download size={14} />
                 )}
                 {pdfLoading ? 'Generando...' : '📄 Descargar PDF'}
               </button>
@@ -504,15 +537,143 @@ export default function Reports() {
               <button
                 onClick={handlePrint}
                 disabled={pdfLoading}
-                className="btn bg-amber-500 hover:bg-amber-600 text-white border-amber-500 shadow-sm"
+                className="btn bg-amber-500 hover:bg-amber-600 text-white border-amber-500 text-xs shadow-sm"
               >
-                <Printer size={16} />
+                <Printer size={14} />
                 🖨️ Imprimir
               </button>
             </div>
           </div>
+
+          {/* ══ MOCKUP VISTA PREVIA VISUAL DE LA HOJA DEL REPORTE ══════════════ */}
+          <div className="border-2 border-red-500 rounded-2xl shadow-lg bg-white overflow-hidden">
+            {/* Encabezado Rojo del Documento */}
+            <div className="bg-red-600 text-white p-4 relative">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex items-center gap-3">
+                  <img src="/LogoCrispyBueno.png" alt="Pollo Crispy" className="w-12 h-12 object-contain bg-white/10 rounded-xl p-1" />
+                  <div>
+                    <h3 className="text-xl font-bold font-display tracking-tight leading-none text-white">POLLO CRISPY</h3>
+                    <p className="text-sm font-bold text-amber-300 mt-1">{currentReportData.title}</p>
+                  </div>
+                </div>
+                <div className="text-right text-xs text-red-100 leading-relaxed font-mono">
+                  <p>Período: <strong className="text-white">{startDate} — {endDate}</strong></p>
+                  <p>Sucursal: <strong className="text-white">{branchName}</strong></p>
+                </div>
+              </div>
+              {/* Franja decorativa Amarilla */}
+              <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-amber-400" />
+            </div>
+
+            {/* Tabla de la Vista Previa */}
+            <div className="p-4 bg-gray-50">
+              <div className="table-wrapper bg-white rounded-xl border border-gray-200 overflow-hidden max-h-80 overflow-y-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-red-600 text-white font-bold sticky top-0 z-10">
+                    <tr>
+                      {currentReportData.columns.map(col => (
+                        <th
+                          key={col.dataKey}
+                          className={`py-2.5 px-3 uppercase tracking-wider ${
+                            col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'
+                          }`}
+                        >
+                          {col.header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {currentReportData.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={currentReportData.columns.length} className="text-center py-8 text-gray-400 font-medium">
+                          No hay datos registrados en el período seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      currentReportData.rows.map((rowItem, rIdx) => {
+                        const rowObj = rowItem as Record<string, unknown>
+                        return (
+                          <tr key={rIdx} className="even:bg-red-50/40 hover:bg-amber-50/60 transition-colors">
+                            {currentReportData.columns.map(col => {
+                              const val = rowObj[col.dataKey]
+                              return (
+                                <td
+                                  key={col.dataKey}
+                                  className={`py-2 px-3 ${
+                                    col.align === 'right' ? 'text-right font-mono font-medium' : col.align === 'center' ? 'text-center' : 'text-left'
+                                  }`}
+                                >
+                                  {val !== undefined && val !== null ? String(val) : '—'}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Caja de Resumen del Documento */}
+              {currentReportData.summary && currentReportData.summary.length > 0 && (
+                <div className="mt-4 bg-amber-50 border-2 border-red-500 rounded-xl p-4 shadow-sm">
+                  <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <TrendingUp size={14} /> RESUMEN DEL REPORTE
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                    {currentReportData.summary.map((sumItem, sIdx) => {
+                      const sum = sumItem as { label: string; value: string; bold?: boolean }
+                      return (
+                        <div key={sIdx} className={`p-2.5 rounded-lg ${sum.bold ? 'bg-red-600 text-white font-bold' : 'bg-white text-gray-800 border border-amber-200'}`}>
+                          <p className={`text-[10px] uppercase font-bold ${sum.bold ? 'text-amber-300' : 'text-gray-500'}`}>{sum.label}</p>
+                          <p className="text-sm font-bold font-mono mt-0.5">{sum.value}</p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* ══ MODAL DE VISTA PREVIA DEL DOCUMENTO PDF REAL ══════════════ */}
+      <Modal
+        isOpen={pdfModalOpen}
+        onClose={() => setPdfModalOpen(false)}
+        title={`Vista Previa PDF — ${currentReportData.title}`}
+        size="xl"
+        footer={
+          <div className="flex justify-between items-center w-full">
+            <span className="text-xs text-gray-500 font-mono">Documento A4 Horizontal (Landscape)</span>
+            <div className="flex gap-2">
+              <button onClick={() => setPdfModalOpen(false)} className="btn btn-secondary text-xs">
+                Cerrar
+              </button>
+              <button onClick={handleGeneratePdf} className="btn bg-red-600 hover:bg-red-700 text-white text-xs">
+                <Download size={14} /> Descargar PDF
+              </button>
+              <button onClick={handlePrint} className="btn bg-amber-500 hover:bg-amber-600 text-white text-xs">
+                <Printer size={14} /> Imprimir
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {pdfBlobUrl ? (
+          <iframe
+            src={pdfBlobUrl}
+            title="Vista previa PDF"
+            className="w-full h-[600px] rounded-xl border border-gray-200 shadow-inner"
+          />
+        ) : (
+          <div className="py-20 text-center text-gray-400">Cargando vista previa...</div>
+        )}
+      </Modal>
 
       {/* Gráfica de ventas diarias */}
       {dailySales.length > 0 && (

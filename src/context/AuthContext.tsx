@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useRef, ReactNode } fro
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { Profile } from '../types'
+import { passkeyService } from '../services/passkey.service'
 
 interface AuthContextType {
   user: User | null
@@ -10,6 +11,7 @@ interface AuthContextType {
   loading: boolean
   initError: string | null
   signIn: (email: string, password: string) => Promise<void>
+  signInWithPasskey: () => Promise<void>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   retryInit: () => void
@@ -87,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const p = await fetchProfile(currentSession.user.id)
           if (!p || !p.is_active) {
             await supabase.auth.signOut()
+            localStorage.removeItem('pollo_passkey_session')
             setUser(null)
             setSession(null)
             setProfile(null)
@@ -95,11 +98,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           setSession(currentSession)
           setUser(currentSession.user)
-        } else {
-          setSession(null)
-          setUser(null)
-          setProfile(null)
+          return
         }
+
+        // Comprobar si existe una sesión previa por Passkey en el navegador
+        const passkeyStorage = localStorage.getItem('pollo_passkey_session')
+        if (passkeyStorage) {
+          try {
+            const parsed = JSON.parse(passkeyStorage)
+            if (parsed.userId) {
+              const p = await fetchProfile(parsed.userId)
+              if (p && p.is_active) {
+                const passkeyUser = {
+                  id: parsed.userId,
+                  email: parsed.email,
+                  aud: 'authenticated',
+                  role: 'authenticated',
+                  app_metadata: {},
+                  user_metadata: {},
+                  created_at: new Date().toISOString(),
+                } as User
+                setUser(passkeyUser)
+                setProfile(p)
+                setSession({
+                  access_token: 'passkey_token',
+                  refresh_token: 'passkey_refresh',
+                  expires_in: 3600,
+                  token_type: 'bearer',
+                  user: passkeyUser,
+                })
+                return
+              }
+            }
+          } catch {
+            localStorage.removeItem('pollo_passkey_session')
+          }
+        }
+
+        setSession(null)
+        setUser(null)
+        setProfile(null)
       })()
 
       await Promise.all([authTask, minSplashDuration])
@@ -118,7 +156,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
-        // Skip duplicate profile fetch if we are still initializing
         if (!isInitialized.current && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN')) {
           return
         }
@@ -127,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const p = await fetchProfile(newSession.user.id)
           if (!p || !p.is_active) {
             await supabase.auth.signOut()
+            localStorage.removeItem('pollo_passkey_session')
             setUser(null)
             setSession(null)
             setProfile(null)
@@ -134,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(newSession)
             setUser(newSession.user)
           }
-        } else {
+        } else if (!localStorage.getItem('pollo_passkey_session')) {
           setSession(null)
           setUser(null)
           setProfile(null)
@@ -147,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signIn = async (email: string, password: string) => {
+    localStorage.removeItem('pollo_passkey_session')
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
@@ -174,12 +213,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const signInWithPasskey = async () => {
+    const result = await passkeyService.authenticatePasskey()
+    if (!result.success || !result.user_id) {
+      throw new Error(result.error || 'No fue posible autenticarte con este dispositivo.')
+    }
+
+    const p = await fetchProfile(result.user_id)
+    if (!p) {
+      throw new Error('No se encontró el perfil de usuario asociado.')
+    }
+    if (!p.is_active) {
+      throw new Error('Tu cuenta se encuentra desactivada. Contacta al administrador.')
+    }
+
+    const passkeyUser = {
+      id: result.user_id,
+      email: result.email,
+      aud: 'authenticated',
+      role: 'authenticated',
+      app_metadata: {},
+      user_metadata: {},
+      created_at: new Date().toISOString(),
+    } as User
+
+    setUser(passkeyUser)
+    setProfile(p)
+    setSession({
+      access_token: 'passkey_token_' + Date.now(),
+      refresh_token: 'passkey_refresh_' + Date.now(),
+      expires_in: 3600,
+      token_type: 'bearer',
+      user: passkeyUser,
+    })
+
+    localStorage.setItem('pollo_passkey_session', JSON.stringify({
+      userId: result.user_id,
+      email: result.email,
+      timestamp: Date.now(),
+    }))
+  }
+
   const signOut = async () => {
     try {
       await supabase.auth.signOut()
     } catch (err) {
       console.warn('Sign out error:', err)
     } finally {
+      localStorage.removeItem('pollo_passkey_session')
       localStorage.removeItem('activeBranchId')
       setProfile(null)
       setUser(null)
@@ -197,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         initError,
         signIn,
+        signInWithPasskey,
         signOut,
         refreshProfile,
         retryInit: initAuth,

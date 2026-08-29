@@ -23,8 +23,11 @@ import {
   X,
   MapPin,
   Mail,
+  Fingerprint,
+  Trash2,
 } from 'lucide-react'
 import { PageLoader } from '../components/ui/EmptyState'
+import { passkeyService, UserPasskey } from '../services/passkey.service'
 import toast from 'react-hot-toast'
 
 const SETTINGS_FIELDS = [
@@ -73,9 +76,58 @@ export default function Settings() {
   const [showPassword, setShowPassword] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
 
+  // Passkey / Biometría state
+  const [passkeys, setPasskeys] = useState<UserPasskey[]>([])
+  const [passkeySupported, setPasskeySupported] = useState(false)
+  const [registeringPasskey, setRegisteringPasskey] = useState(false)
+  const [revokingPasskey, setRevokingPasskey] = useState(false)
+
   const hasMinLength = newPassword.length >= 6
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
   const isPasswordValid = hasMinLength && passwordsMatch
+
+  useEffect(() => {
+    if (user?.id) {
+      passkeyService.isSupported().then(setPasskeySupported)
+      loadUserPasskeys()
+    }
+  }, [user?.id])
+
+  const loadUserPasskeys = async () => {
+    if (user?.id) {
+      const list = await passkeyService.getUserPasskeys(user.id)
+      setPasskeys(list)
+    }
+  }
+
+  const handleRegisterPasskey = async () => {
+    if (!user || !user.email) return
+    setRegisteringPasskey(true)
+    try {
+      const res = await passkeyService.registerPasskey(user.id, user.email)
+      toast.success(res.message)
+      await loadUserPasskeys()
+    } catch (err: any) {
+      toast.error(err.message || 'Error al activar acceso por huella.')
+    } finally {
+      setRegisteringPasskey(false)
+    }
+  }
+
+  const handleRevokePasskey = async () => {
+    if (!user) return
+    if (!window.confirm('¿Deseas desactivar el acceso por huella / Passkey de tu cuenta?')) return
+    setRevokingPasskey(true)
+    try {
+      await passkeyService.revokePasskey(user.id)
+      toast.success('Acceso por huella desactivado correctamente.')
+      await loadUserPasskeys()
+    } catch (err: any) {
+      toast.error(err.message || 'Error al desactivar el acceso por huella.')
+    } finally {
+      setRevokingPasskey(false)
+    }
+  }
 
   useEffect(() => {
     if (profile) {
@@ -489,6 +541,116 @@ export default function Settings() {
                 </button>
               </div>
             </form>
+          </div>
+
+          {/* ── SECCIÓN: BIOMETRÍA Y PASSKEYS (WEBAUTHN) ── */}
+          <div className="card card-body space-y-4 border border-amber-200 bg-amber-50/20">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/60 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-red-600/20">
+                  <Fingerprint size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 font-display text-base">
+                    Acceso por Huella Digital / Biometría
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Accede sin escribir tu clave utilizando Windows Hello, Touch ID, Face ID o la biometría de tu dispositivo.
+                  </p>
+                </div>
+              </div>
+
+              {passkeys.length > 0 ? (
+                <span className="badge badge-green font-bold text-xs flex items-center gap-1 shrink-0">
+                  <CheckCircle size={13} /> Acceso biométrico activo
+                </span>
+              ) : (
+                <span className="badge badge-gray font-medium text-xs shrink-0">Sin huella registrada</span>
+              )}
+            </div>
+
+            {passkeySupported ? (
+              <div className="space-y-4">
+                {passkeys.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-gray-700">Dispositivos con acceso biométrico activado:</p>
+                    <div className="space-y-2">
+                      {passkeys.map(pk => (
+                        <div
+                          key={pk.id}
+                          className="p-3 bg-white rounded-2xl border border-gray-200 flex items-center justify-between text-xs gap-3 shadow-sm"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold shrink-0">
+                              <Fingerprint size={18} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900 truncate">{pk.device_name}</p>
+                              <p className="text-[10px] text-gray-400 font-mono">
+                                Registrada el {new Date(pk.created_at).toLocaleDateString('es-HN')}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleRevokePasskey}
+                            disabled={revokingPasskey}
+                            className="btn btn-secondary text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 py-1.5 px-3 shrink-0"
+                          >
+                            <Trash2 size={13} /> Desactivar acceso con huella
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleRegisterPasskey}
+                    disabled={registeringPasskey}
+                    className="btn btn-yellow font-bold text-xs px-5 py-2.5 shadow-sm active:scale-95"
+                  >
+                    {registeringPasskey ? (
+                      <div className="w-4 h-4 border-2 border-amber-900/30 border-t-amber-900 rounded-full animate-spin" />
+                    ) : (
+                      <Fingerprint size={16} />
+                    )}
+                    <span>
+                      {registeringPasskey
+                        ? 'Verificando con dispositivo...'
+                        : 'Activar acceso con huella / Passkey'}
+                    </span>
+                  </button>
+
+                  {passkeys.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRevokePasskey}
+                      disabled={revokingPasskey}
+                      className="btn btn-secondary font-semibold text-xs text-red-600 border-red-200 hover:bg-red-50 px-4 py-2.5"
+                    >
+                      {revokingPasskey ? 'Desactivando...' : 'Desactivar acceso con huella'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-3 bg-white/80 rounded-xl border border-gray-200/80 text-[11px] text-gray-500 space-y-1">
+                  <p className="font-bold text-gray-700 flex items-center gap-1">
+                    <Shield size={13} className="text-emerald-600" /> Seguridad nativa del dispositivo:
+                  </p>
+                  <p>
+                    Tu biometría es procesada exclusivamente por tu sistema operativo (Windows Hello, iOS o Android) y <strong>NUNCA es almacenada ni enviada a nuestros servidores</strong>.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-gray-100 rounded-xl text-xs text-gray-600">
+                La autenticación biométrica WebAuthn no está disponible en este navegador o requiere conexión segura (HTTPS o localhost).
+              </div>
+            )}
           </div>
         </div>
       )}

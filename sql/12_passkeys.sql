@@ -40,7 +40,7 @@ CREATE POLICY "user_passkeys_delete" ON public.user_passkeys
 -- ============================================================
 -- FUNCIÓN SECURITY DEFINER: login_with_passkey
 -- Permite validar el acceso biométrico comprobando el credential_id
--- y verificando que el perfil esté activo.
+-- con coincidencia exacta y normalizada de Base64.
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.login_with_passkey(p_credential_id TEXT)
 RETURNS JSONB
@@ -52,9 +52,16 @@ DECLARE
   v_passkey RECORD;
   v_profile RECORD;
   v_email   TEXT;
+  v_norm_id TEXT;
 BEGIN
-  -- 1. Buscar credencial registrada
-  SELECT * INTO v_passkey FROM public.user_passkeys WHERE credential_id = p_credential_id;
+  -- Normalizar identificador Base64URL
+  v_norm_id := REPLACE(REPLACE(TRIM(p_credential_id), '=', ''), '_', '/');
+
+  -- 1. Buscar credencial por id directo o normalizado
+  SELECT * INTO v_passkey FROM public.user_passkeys
+  WHERE credential_id = p_credential_id
+     OR REPLACE(REPLACE(TRIM(credential_id), '=', ''), '_', '/') = v_norm_id;
+
   IF v_passkey IS NULL THEN
     RETURN jsonb_build_object('success', false, 'error', 'Credencial biométrica no registrada en este sistema.');
   END IF;

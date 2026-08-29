@@ -48,7 +48,6 @@ export const passkeyService = {
       return false
     }
 
-    // En navegadores web, localhost y HTTPS son contextos seguros válidos
     if (!window.isSecureContext) {
       const isLocalhost = Boolean(
         window.location.hostname === 'localhost' ||
@@ -69,12 +68,12 @@ export const passkeyService = {
     }
   },
 
-  // Saber si este dispositivo local ya tiene una huella/passkey vinculada
+  // Saber si este dispositivo local tiene una huella registrada
   getLocalPasskeyId(): string | null {
     return localStorage.getItem('pollo_registered_passkey')
   },
 
-  // Obtener passkeys registradas desde la base de datos
+  // Obtener passkeys registradas desde Supabase
   async getUserPasskeys(userId: string): Promise<UserPasskey[]> {
     try {
       const { data, error } = await supabase
@@ -90,7 +89,7 @@ export const passkeyService = {
     }
   },
 
-  // PASO 1: REGISTRO — Solicitar al SO la activación biométrica (Samsung, iPhone, Windows Hello)
+  // PASO 1: REGISTRO — Invocar el lector biométrico nativo (Windows Hello, Samsung Fingerprint, iPhone Face ID)
   async registerPasskey(userId: string, email: string): Promise<{ success: boolean; message: string }> {
     const supported = await this.isSupported()
     if (!supported) {
@@ -100,7 +99,6 @@ export const passkeyService = {
     const challenge = window.crypto.getRandomValues(new Uint8Array(32))
     const userIdBytes = new TextEncoder().encode(userId)
 
-    // Configuración para invocar directamente el sensor biométrico del dispositivo (platform authenticator)
     const publicKeyOptions: PublicKeyCredentialCreationOptions = {
       challenge,
       rp: {
@@ -117,16 +115,15 @@ export const passkeyService = {
         { alg: -257, type: 'public-key' },  // RS256
       ],
       authenticatorSelection: {
-        authenticatorAttachment: 'platform', // Obliga a usar la huella / Face ID / Windows Hello nativo del dispositivo
+        authenticatorAttachment: 'platform',
         userVerification: 'required',
-        residentKey: 'required',
+        residentKey: 'preferred',
       },
       timeout: 60000,
       attestation: 'none',
     }
 
     try {
-      // Abre el diálogo nativo del sistema operativo (Huella en Samsung, Face ID en iPhone, Windows Hello en PC)
       const credential = (await navigator.credentials.create({
         publicKey: publicKeyOptions,
       })) as PublicKeyCredential
@@ -135,10 +132,11 @@ export const passkeyService = {
         throw new Error('No se completó la verificación biométrica.')
       }
 
-      const credentialIdStr = arrayBufferToBase64Url(credential.rawId)
+      // Obtener el identificador Base64URL uniforme
+      const credentialIdStr = credential.id || arrayBufferToBase64Url(credential.rawId)
       const deviceName = getDeviceName()
 
-      // Guardar únicamente la metadata pública necesaria (NUNCA huellas ni claves privadas)
+      // Guardar en la base de datos de Supabase
       const { error } = await supabase.from('user_passkeys').insert({
         user_id: userId,
         credential_id: credentialIdStr,
@@ -149,7 +147,7 @@ export const passkeyService = {
         throw error
       }
 
-      // Guardar el id localmente para permitir el acceso biométrico directo en el login
+      // Guardar el identificador localmente
       localStorage.setItem('pollo_registered_passkey', credentialIdStr)
 
       return {
@@ -165,7 +163,7 @@ export const passkeyService = {
     }
   },
 
-  // PASO 2: AUTENTICACIÓN — Iniciar sesión con la huella / Face ID / Windows Hello del dispositivo
+  // PASO 2: AUTENTICACIÓN — Iniciar sesión con la huella
   async authenticatePasskey(): Promise<{
     success: boolean
     user_id?: string
@@ -185,7 +183,6 @@ export const passkeyService = {
     const localCredId = this.getLocalPasskeyId()
     const challenge = window.crypto.getRandomValues(new Uint8Array(32))
 
-    // Preparar los parámetros de autenticación nativa
     const publicKeyOptions: PublicKeyCredentialRequestOptions = {
       challenge,
       timeout: 60000,
@@ -193,7 +190,6 @@ export const passkeyService = {
       rpId: window.location.hostname,
     }
 
-    // Si tenemos la credencial local registrada, la especificamos en allowCredentials para activar directamente el lector nativo
     if (localCredId) {
       publicKeyOptions.allowCredentials = [
         {
@@ -204,7 +200,6 @@ export const passkeyService = {
     }
 
     try {
-      // Activa el lector nativo del dispositivo (Sensor de Huella Samsung/Android, Face ID, Windows Hello)
       const assertion = (await navigator.credentials.get({
         publicKey: publicKeyOptions,
       })) as PublicKeyCredential
@@ -216,9 +211,9 @@ export const passkeyService = {
         }
       }
 
-      const credentialIdStr = arrayBufferToBase64Url(assertion.rawId)
+      const credentialIdStr = assertion.id || arrayBufferToBase64Url(assertion.rawId)
 
-      // Verificar la credencial en el servidor Supabase
+      // Verificar en Supabase
       const { data, error } = await supabase.rpc('login_with_passkey', {
         p_credential_id: credentialIdStr,
       })
@@ -237,7 +232,7 @@ export const passkeyService = {
         }
       }
 
-      // Guardar el ID de la credencial usada
+      // Guardar el id localmente
       localStorage.setItem('pollo_registered_passkey', credentialIdStr)
 
       return data

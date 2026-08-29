@@ -544,50 +544,56 @@ export default function Settings() {
           </div>
 
           {/* ── SECCIÓN: BIOMETRÍA Y PASSKEYS (WEBAUTHN) ── */}
-          <div className="card card-body space-y-4 border border-amber-200 bg-amber-50/20">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/60 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-red-600/20">
-                  <Fingerprint size={22} />
+          <div className="card card-body space-y-5 border border-red-100 bg-gradient-to-br from-red-50/40 via-white to-amber-50/40">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-red-600/20">
+                  <Fingerprint size={24} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-900 font-display text-base">
-                    Acceso por Huella Digital / Biometría
+                  <h3 className="font-bold text-gray-900 font-display text-base sm:text-lg">
+                    Acceso con Huella Digital / Biometría
                   </h3>
-                  <p className="text-xs text-gray-500">
-                    Accede sin escribir tu clave utilizando Windows Hello, Touch ID, Face ID o la biometría de tu dispositivo.
+                  <p className="text-xs text-gray-500 mt-0.5 max-w-lg">
+                    Accede al sistema sin escribir tu clave usando Windows Hello, Touch ID, Face ID o la huella registrada en tu teléfono.
                   </p>
                 </div>
               </div>
 
-              {passkeys.length > 0 ? (
-                <span className="badge badge-green font-bold text-xs flex items-center gap-1 shrink-0">
-                  <CheckCircle size={13} /> Acceso biométrico activo
-                </span>
-              ) : (
-                <span className="badge badge-gray font-medium text-xs shrink-0">Sin huella registrada</span>
-              )}
+              <div className="shrink-0 self-start md:self-center">
+                {passkeys.length > 0 ? (
+                  <span className="badge badge-green font-bold text-xs flex items-center gap-1.5 px-3 py-1">
+                    <CheckCircle size={14} /> Acceso biométrico activo
+                  </span>
+                ) : (
+                  <span className="badge badge-gray font-semibold text-xs px-3 py-1">
+                    Sin huella vinculada
+                  </span>
+                )}
+              </div>
             </div>
 
             {passkeySupported ? (
               <div className="space-y-4">
                 {passkeys.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-xs font-bold text-gray-700">Dispositivos con acceso biométrico activado:</p>
-                    <div className="space-y-2">
+                    <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+                      Dispositivos con acceso biométrico activado:
+                    </p>
+                    <div className="grid grid-cols-1 gap-2.5">
                       {passkeys.map(pk => (
                         <div
                           key={pk.id}
-                          className="p-3 bg-white rounded-2xl border border-gray-200 flex items-center justify-between text-xs gap-3 shadow-sm"
+                          className="p-3.5 bg-white rounded-2xl border border-gray-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm hover:border-red-200 transition-colors"
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold shrink-0">
-                              <Fingerprint size={18} />
+                            <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold shrink-0">
+                              <Fingerprint size={20} />
                             </div>
                             <div className="min-w-0">
-                              <p className="font-bold text-gray-900 truncate">{pk.device_name}</p>
-                              <p className="text-[10px] text-gray-400 font-mono">
-                                Registrada el {new Date(pk.created_at).toLocaleDateString('es-HN')}
+                              <p className="font-bold text-gray-900 truncate text-sm">{pk.device_name}</p>
+                              <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                                Registrada el {new Date(pk.created_at).toLocaleDateString('es-HN', { day: '2-digit', month: 'long', year: 'numeric' })}
                               </p>
                             </div>
                           </div>
@@ -596,9 +602,9 @@ export default function Settings() {
                             type="button"
                             onClick={handleRevokePasskey}
                             disabled={revokingPasskey}
-                            className="btn btn-secondary text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 py-1.5 px-3 shrink-0"
+                            className="btn btn-secondary text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 py-2 px-3.5 shrink-0 self-start sm:self-center font-semibold"
                           >
-                            <Trash2 size={13} /> Desactivar acceso con huella
+                            <Trash2 size={14} /> Desactivar acceso con huella
                           </button>
                         </div>
                       ))}
@@ -606,17 +612,17 @@ export default function Settings() {
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center gap-3 pt-1">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
                   <button
                     type="button"
                     onClick={handleRegisterPasskey}
                     disabled={registeringPasskey}
-                    className="btn btn-yellow font-bold text-xs px-5 py-2.5 shadow-sm active:scale-95"
+                    className="btn btn-yellow font-bold text-xs sm:text-sm px-6 py-3 shadow-md hover:shadow-lg active:scale-98 flex items-center justify-center gap-2"
                   >
                     {registeringPasskey ? (
                       <div className="w-4 h-4 border-2 border-amber-900/30 border-t-amber-900 rounded-full animate-spin" />
                     ) : (
-                      <Fingerprint size={16} />
+                      <Fingerprint size={18} />
                     )}
                     <span>
                       {registeringPasskey
@@ -630,24 +636,25 @@ export default function Settings() {
                       type="button"
                       onClick={handleRevokePasskey}
                       disabled={revokingPasskey}
-                      className="btn btn-secondary font-semibold text-xs text-red-600 border-red-200 hover:bg-red-50 px-4 py-2.5"
+                      className="btn btn-secondary font-semibold text-xs text-red-600 border-red-200 hover:bg-red-50 px-5 py-3 flex items-center justify-center gap-1.5"
                     >
-                      {revokingPasskey ? 'Desactivando...' : 'Desactivar acceso con huella'}
+                      <Trash2 size={14} />
+                      <span>{revokingPasskey ? 'Desactivando...' : 'Desactivar acceso'}</span>
                     </button>
                   )}
                 </div>
 
-                <div className="p-3 bg-white/80 rounded-xl border border-gray-200/80 text-[11px] text-gray-500 space-y-1">
-                  <p className="font-bold text-gray-700 flex items-center gap-1">
-                    <Shield size={13} className="text-emerald-600" /> Seguridad nativa del dispositivo:
+                <div className="p-3.5 bg-white/90 rounded-2xl border border-gray-200/80 text-[11px] text-gray-600 space-y-1">
+                  <p className="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+                    <Shield size={14} className="text-emerald-600" /> Seguridad nativa del dispositivo:
                   </p>
-                  <p>
+                  <p className="leading-relaxed">
                     Tu biometría es procesada exclusivamente por tu sistema operativo (Windows Hello, iOS o Android) y <strong>NUNCA es almacenada ni enviada a nuestros servidores</strong>.
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="p-3 bg-gray-100 rounded-xl text-xs text-gray-600">
+              <div className="p-3.5 bg-gray-100 rounded-2xl text-xs text-gray-600">
                 La autenticación biométrica WebAuthn no está disponible en este navegador o requiere conexión segura (HTTPS o localhost).
               </div>
             )}

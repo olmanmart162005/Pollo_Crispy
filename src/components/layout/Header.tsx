@@ -3,6 +3,7 @@ import { Menu, Bell, ChevronDown, MapPin, Download, Smartphone, CheckCircle, Sha
 import { useAuth } from '../../context/AuthContext'
 import { useBranch } from '../../context/BranchContext'
 import { usePermissions } from '../../hooks/usePermissions'
+import UserMenu from './UserMenu'
 import Modal from '../ui/Modal'
 
 interface HeaderProps {
@@ -10,7 +11,6 @@ interface HeaderProps {
 }
 
 export default function Header({ onMenuClick }: HeaderProps) {
-  const { profile } = useAuth()
   const { branches, activeBranch, setActiveBranch } = useBranch()
   const { isSuperAdmin } = usePermissions()
   const [showBranchMenu, setShowBranchMenu] = useState(false)
@@ -51,6 +51,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
         <button
           onClick={onMenuClick}
           className="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
+          aria-label="Abrir menú de navegación"
         >
           <Menu size={20} />
         </button>
@@ -99,36 +100,17 @@ export default function Header({ onMenuClick }: HeaderProps) {
               title="Instalar Pollo Crispy POS en tu dispositivo"
             >
               <Download size={14} />
-              <span>Instalar App</span>
+              <span className="hidden sm:inline">Instalar App</span>
             </button>
           )}
 
           <button className="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
             <Bell size={18} />
           </button>
-          <div className="flex items-center gap-2.5 pl-2 border-l border-gray-100">
-            {profile?.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={profile.full_name}
-                className="w-9 h-9 rounded-full object-cover border-2 border-red-500 shadow-sm"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                  if (e.currentTarget.nextElementSibling) {
-                    (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
-                  }
-                }}
-              />
-            ) : null}
-            <div
-              className="w-9 h-9 bg-gradient-to-br from-red-600 to-red-700 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-sm"
-              style={{ display: profile?.avatar_url ? 'none' : 'flex' }}
-            >
-              {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-            </div>
-            <div className="hidden sm:block">
-              <div className="text-sm font-bold text-gray-900 leading-tight">{profile?.full_name || 'Usuario'}</div>
-            </div>
+
+          {/* User Menu Dropdown with Profile, Settings & Logout */}
+          <div className="pl-2 border-l border-gray-100">
+            <UserMenu />
           </div>
         </div>
       </header>

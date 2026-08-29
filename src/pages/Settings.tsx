@@ -1,8 +1,29 @@
 import { useEffect, useState, ChangeEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useBranch } from '../context/BranchContext'
+import { usePermissions } from '../hooks/usePermissions'
 import { reportsService } from '../services/reports.service'
 import { usersService } from '../services/users.service'
-import { Settings as SettingsIcon, Save, User as UserIcon, Upload, Camera, CheckCircle } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { roleLabel } from '../utils'
+import {
+  Settings as SettingsIcon,
+  Save,
+  User as UserIcon,
+  Upload,
+  Camera,
+  CheckCircle,
+  Shield,
+  Store,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Check,
+  X,
+  MapPin,
+  Mail,
+} from 'lucide-react'
 import { PageLoader } from '../components/ui/EmptyState'
 import toast from 'react-hot-toast'
 
@@ -18,31 +39,61 @@ const SETTINGS_FIELDS = [
 ]
 
 export default function Settings() {
-  const { profile, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
+  const { branches, activeBranch } = useBranch()
+  const { isSuperAdmin, isAdmin } = usePermissions()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const initialTab = searchParams.get('tab') || 'perfil'
+  const [activeTab, setActiveTab] = useState<'perfil' | 'seguridad' | 'negocio'>(
+    initialTab === 'seguridad' || initialTab === 'negocio' ? initialTab : 'perfil'
+  )
+
+  // Sync tab with URL
+  const handleTabChange = (tab: 'perfil' | 'seguridad' | 'negocio') => {
+    setActiveTab(tab)
+    setSearchParams({ tab })
+  }
+
+  // Business settings state
   const [settings, setSettings] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [loadingBusiness, setLoadingBusiness] = useState(false)
+  const [savingBusiness, setSavingBusiness] = useState(false)
 
   // Profile editing state
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarError, setAvatarError] = useState(false)
   const [savingProfile, setSavingProfile] = useState(false)
 
-  useEffect(() => {
-    load()
-  }, [])
+  // Password change state
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+
+  const hasMinLength = newPassword.length >= 6
+  const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
+  const isPasswordValid = hasMinLength && passwordsMatch
 
   useEffect(() => {
     if (profile) {
       setFullName(profile.full_name || '')
       setPhone(profile.phone || '')
       setAvatarUrl(profile.avatar_url || '')
+      setAvatarError(false)
     }
   }, [profile])
 
-  const load = async () => {
-    setLoading(true)
+  useEffect(() => {
+    if (isAdmin && activeTab === 'negocio') {
+      loadBusinessSettings()
+    }
+  }, [isAdmin, activeTab])
+
+  const loadBusinessSettings = async () => {
+    setLoadingBusiness(true)
     try {
       const data = await reportsService.getSettings()
       const parsed: Record<string, string> = {}
@@ -51,15 +102,15 @@ export default function Settings() {
       })
       setSettings(parsed)
     } catch {
-      toast.error('Error cargando configuración')
+      toast.error('Error cargando configuración del negocio')
     } finally {
-      setLoading(false)
+      setLoadingBusiness(false)
     }
   }
 
   const saveBusinessSettings = async () => {
     if (!profile) return
-    setSaving(true)
+    setSavingBusiness(true)
     try {
       for (const f of SETTINGS_FIELDS) {
         if (settings[f.key] !== undefined) {
@@ -71,11 +122,10 @@ export default function Settings() {
     } catch {
       toast.error('Error guardando configuración')
     } finally {
-      setSaving(false)
+      setSavingBusiness(false)
     }
   }
 
-  // Handle local image file upload
   const handleImageFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -86,7 +136,7 @@ export default function Settings() {
     const reader = new FileReader()
     reader.onload = () => {
       setAvatarUrl(reader.result as string)
-      toast.success('Imagen cargada. Haz clic en "Guardar Perfil" para aplicar.')
+      toast.success('Imagen cargada. Haz clic en "Guardar Mi Perfil" para aplicar.')
     }
     reader.readAsDataURL(file)
   }
@@ -114,143 +164,402 @@ export default function Settings() {
     }
   }
 
-  if (loading) return <PageLoader />
+  const handleChangeOwnPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newPassword || !confirmPassword) {
+      toast.error('Por favor completa todos los campos de contraseña')
+      return
+    }
+    if (!isPasswordValid) {
+      toast.error('Por favor cumple los requisitos de contraseña')
+      return
+    }
+    setChangingPassword(true)
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      })
+      if (error) throw error
+      toast.success('Contraseña actualizada correctamente')
+      setNewPassword('')
+      setConfirmPassword('')
+      setShowPassword(false)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'No fue posible cambiar la contraseña.'
+      toast.error(msg)
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
+  const role = profile?.role || 'CAJERO'
 
   return (
-    <div className="max-w-2xl space-y-6 animate-fade-in">
-      <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
-        <SettingsIcon size={24} className="text-red-600" /> Configuración
-      </h1>
-
-      {/* ── CARD: MI PERFIL Y FOTO DE PERFIL ────────────────────────────── */}
-      <div className="card border-t-4 border-t-red-600 card-body space-y-4">
-        <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-          <UserIcon size={20} className="text-red-600" />
-          <h2 className="font-bold text-gray-900 font-display text-lg">Mi Perfil y Foto de Perfil</h2>
+    <div className="max-w-4xl space-y-6 animate-fade-in pb-10">
+      {/* Encabezado */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 font-display flex items-center gap-2">
+            <SettingsIcon size={24} className="text-red-600" /> Configuración del Sistema
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Administra tu perfil personal, credenciales de seguridad y preferencias.
+          </p>
         </div>
+      </div>
 
-        <div className="flex flex-col sm:flex-row items-center gap-5 pt-2">
-          {/* Avatar preview */}
-          <div className="relative group shrink-0">
-            <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-red-500 shadow-md bg-red-50 flex items-center justify-center">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={fullName}
-                  className="w-full h-full object-cover"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = 'none'
-                  }}
-                />
-              ) : (
-                <span className="text-3xl font-extrabold text-red-600">
-                  {fullName?.charAt(0)?.toUpperCase() || '?'}
-                </span>
-              )}
+      {/* Navegación por pestañas */}
+      <div className="flex border-b border-gray-200 gap-2 overflow-x-auto">
+        <button
+          onClick={() => handleTabChange('perfil')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'perfil'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <UserIcon size={18} />
+          <span>Mi Perfil</span>
+        </button>
+
+        <button
+          onClick={() => handleTabChange('seguridad')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'seguridad'
+              ? 'border-red-600 text-red-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <KeyRound size={18} />
+          <span>Seguridad y Contraseña</span>
+        </button>
+
+        {isAdmin && (
+          <button
+            onClick={() => handleTabChange('negocio')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'negocio'
+                ? 'border-red-600 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <Store size={18} />
+            <span>Configuración del Negocio</span>
+          </button>
+        )}
+      </div>
+
+      {/* ── PESTAÑA 1: MI PERFIL ────────────────────────────────────────── */}
+      {activeTab === 'perfil' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="card card-accent card-body space-y-6">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <UserIcon size={20} className="text-red-600" />
+                <h2 className="font-bold text-gray-900 font-display text-lg">Información Personal</h2>
+              </div>
+              <span className="badge badge-gray text-xs">ID: {profile?.id?.slice(0, 8)}...</span>
             </div>
 
-            {/* Floating button */}
-            <label className="absolute bottom-0 right-0 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full shadow-md cursor-pointer transition-transform hover:scale-110">
-              <Camera size={16} />
-              <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
-            </label>
-          </div>
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+              {/* Avatar con selector interactivo */}
+              <div className="relative group shrink-0">
+                <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-red-500 shadow-md bg-red-50 flex items-center justify-center">
+                  {avatarUrl && !avatarError ? (
+                    <img
+                      src={avatarUrl}
+                      alt={fullName}
+                      className="w-full h-full object-cover"
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <span className="text-4xl font-extrabold text-red-600">
+                      {fullName?.charAt(0)?.toUpperCase() || '?'}
+                    </span>
+                  )}
+                </div>
 
-          {/* Form inputs */}
-          <div className="flex-1 space-y-3 w-full">
-            <div className="form-group">
-              <label className="label">Nombre completo</label>
-              <input
-                type="text"
-                className="input font-medium"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Tu nombre completo"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="label">Teléfono</label>
-              <input
-                type="text"
-                className="input font-medium"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+504 9999-9999"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="label flex items-center justify-between">
-                <span>Foto de perfil (URL o subir archivo)</span>
-                <label className="text-xs text-red-600 hover:underline cursor-pointer flex items-center gap-1 font-semibold">
-                  <Upload size={12} /> Subir desde dispositivo
+                <label
+                  className="absolute bottom-0 right-0 bg-red-600 hover:bg-red-700 text-white p-2.5 rounded-full shadow-md cursor-pointer transition-transform hover:scale-110"
+                  title="Cambiar foto de perfil"
+                >
+                  <Camera size={16} />
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
                 </label>
-              </label>
-              <input
-                type="text"
-                className="input text-xs font-mono"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                placeholder="https://... o sube una foto arriba"
-              />
+              </div>
+
+              {/* Campos del perfil */}
+              <div className="flex-1 space-y-4 w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="form-group">
+                    <label className="label">Nombre completo *</label>
+                    <input
+                      type="text"
+                      className="input font-medium"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      placeholder="Tu nombre completo"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="label">Teléfono</label>
+                    <input
+                      type="text"
+                      className="input font-medium"
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      placeholder="+504 9999-9999"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="label flex items-center justify-between">
+                    <span>Foto de perfil (URL directa o subir imagen)</span>
+                    <label className="text-xs text-red-600 hover:underline cursor-pointer flex items-center gap-1 font-semibold">
+                      <Upload size={12} /> Subir desde el equipo
+                      <input type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+                    </label>
+                  </label>
+                  <input
+                    type="text"
+                    className="input text-xs font-mono"
+                    value={avatarUrl}
+                    onChange={e => setAvatarUrl(e.target.value)}
+                    placeholder="https://... o sube una imagen con el botón"
+                  />
+                </div>
+
+                {/* Rol y Sucursal asignada (Solo Lectura Informativa) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1">
+                      Correo de Acceso
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Mail size={16} className="text-red-600 shrink-0" />
+                      <span className="font-bold text-gray-900 text-xs font-mono truncate">
+                        {user?.email || profile?.email || 'Sin correo'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1">
+                      Rol Asignado
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Shield size={16} className="text-red-600 shrink-0" />
+                      <span className="font-bold text-gray-900 text-sm">{roleLabel(role)}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1">
+                      Sucursal Activa
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <MapPin size={16} className="text-red-600 shrink-0" />
+                      <span className="font-bold text-gray-900 text-sm truncate">
+                        {isSuperAdmin
+                          ? activeBranch
+                            ? activeBranch.name
+                            : 'Todas las sucursales'
+                          : activeBranch?.name || 'Sin sucursal asignada'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={saveUserProfile}
+                disabled={savingProfile}
+                className="btn btn-primary font-bold px-6"
+              >
+                {savingProfile ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle size={16} /> Guardar Mi Perfil
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
+      )}
 
-        <div className="pt-2 flex justify-end">
-          <button
-            onClick={saveUserProfile}
-            disabled={savingProfile}
-            className="btn btn-primary font-bold"
-          >
-            {savingProfile ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <CheckCircle size={16} />
-            )}
-            {savingProfile ? 'Guardando...' : 'Guardar Mi Perfil'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── CARD: INFORMACIÓN DEL NEGOCIO ───────────────────────────────── */}
-      <div className="card card-body space-y-4">
-        <h2 className="font-bold text-gray-900 font-display border-b border-gray-100 pb-2">Información del Negocio</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {SETTINGS_FIELDS.map(f => (
-            <div key={f.key} className="form-group">
-              <label className="label">{f.label}</label>
-              <input
-                type={f.type}
-                className="input"
-                value={settings[f.key] || ''}
-                onChange={e => setSettings(prev => ({ ...prev, [f.key]: e.target.value }))}
-              />
+      {/* ── PESTAÑA 2: SEGURIDAD Y CONTRASEÑA ───────────────────────────── */}
+      {activeTab === 'seguridad' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="card card-accent card-body space-y-6">
+            <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
+              <KeyRound size={20} className="text-red-600" />
+              <h2 className="font-bold text-gray-900 font-display text-lg">Cambiar Mi Contraseña</h2>
             </div>
-          ))}
-        </div>
-        <button onClick={saveBusinessSettings} disabled={saving} className="btn btn-secondary mt-2">
-          {saving ? 'Guardando...' : <><Save size={16} /> Guardar Configuración del Negocio</>}
-        </button>
-      </div>
 
-      {/* ── CARD: VISTA PREVIA DEL TICKET ──────────────────────────────── */}
-      <div className="card card-body">
-        <h2 className="font-bold text-gray-900 font-display mb-3">Vista previa del Ticket</h2>
-        <div className="border border-dashed border-gray-300 rounded-xl p-4 text-center font-mono text-xs max-w-xs mx-auto space-y-1 bg-gray-50">
-          <p className="text-base font-bold text-gray-900">{settings.ticket_header || 'POLLO CRISPY'}</p>
-          <p className="text-gray-500">{settings.business_address || 'Dirección'}</p>
-          <p className="text-gray-500">{settings.business_phone || 'Teléfono'}</p>
-          <div className="border-t border-dashed border-gray-300 my-2" />
-          <p>Producto........................ {settings.currency_symbol || 'L'} 45.00</p>
-          <div className="border-t border-dashed border-gray-300 my-2" />
-          <p className="font-bold text-gray-900">TOTAL: {settings.currency_symbol || 'L'} 45.00</p>
-          <div className="border-t border-dashed border-gray-300 my-2" />
-          <p className="text-gray-500">{settings.ticket_footer || '¡Gracias por su compra!'}</p>
+            <form onSubmit={handleChangeOwnPassword} className="space-y-4 max-w-lg">
+              <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <Shield size={14} className="text-amber-700" /> Actualización protegida por Supabase Auth
+                </p>
+                <p className="text-amber-800">
+                  Ingresa tu nueva contraseña y confírmala. Al guardar, tu sesión continuará activa y tu clave se actualizará de inmediato.
+                </p>
+              </div>
+
+              {/* Nueva contraseña */}
+              <div className="form-group">
+                <label className="label">Nueva Contraseña *</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className="input pr-10"
+                    placeholder="Min. 6 caracteres"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    disabled={changingPassword}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(p => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirmar nueva contraseña */}
+              <div className="form-group">
+                <label className="label">Confirmar Nueva Contraseña *</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    className="input pr-10"
+                    placeholder="Repite la nueva contraseña"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    disabled={changingPassword}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(p => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Checklist */}
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 space-y-1.5 text-xs">
+                <p className="font-semibold text-gray-700 mb-1">Requisitos de contraseña:</p>
+                <div className={`flex items-center gap-2 ${hasMinLength ? 'text-emerald-600' : 'text-gray-500'}`}>
+                  {hasMinLength ? <Check size={14} className="text-emerald-500" /> : <X size={14} className="text-gray-400" />}
+                  <span>Mínimo 6 caracteres</span>
+                </div>
+                <div className={`flex items-center gap-2 ${passwordsMatch ? 'text-emerald-600' : 'text-gray-500'}`}>
+                  {passwordsMatch ? <Check size={14} className="text-emerald-500" /> : <X size={14} className="text-gray-400" />}
+                  <span>Las contraseñas coinciden</span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={!isPasswordValid || changingPassword}
+                  className="btn btn-primary font-bold px-6"
+                >
+                  {changingPassword ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle size={16} /> Actualizar Mi Contraseña
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── PESTAÑA 3: NEGOCIO (Solo Super Admin y Admin) ───────────────── */}
+      {isAdmin && activeTab === 'negocio' && (
+        <div className="space-y-6 animate-fade-in">
+          {loadingBusiness ? (
+            <PageLoader />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Formulario de Configuración del Negocio */}
+              <div className="lg:col-span-2 card card-accent card-body space-y-4">
+                <h2 className="font-bold text-gray-900 font-display border-b border-gray-100 pb-2">
+                  Información y Parámetros del Negocio
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {SETTINGS_FIELDS.map(f => (
+                    <div key={f.key} className="form-group">
+                      <label className="label">{f.label}</label>
+                      <input
+                        type={f.type}
+                        className="input"
+                        value={settings[f.key] || ''}
+                        onChange={e => setSettings(prev => ({ ...prev, [f.key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-3 flex justify-end">
+                  <button
+                    onClick={saveBusinessSettings}
+                    disabled={savingBusiness}
+                    className="btn btn-primary font-bold px-6"
+                  >
+                    {savingBusiness ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Save size={16} /> Guardar Configuración
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Vista Previa del Ticket */}
+              <div className="card card-body flex flex-col items-center justify-start">
+                <h2 className="font-bold text-gray-900 font-display mb-3 text-center">
+                  Vista Previa del Ticket
+                </h2>
+                <div className="w-full border border-dashed border-gray-300 rounded-xl p-4 text-center font-mono text-xs max-w-xs space-y-1 bg-gray-50 shadow-inner">
+                  <p className="text-base font-bold text-gray-900">
+                    {settings.ticket_header || 'POLLO CRISPY'}
+                  </p>
+                  <p className="text-gray-500">{settings.business_address || 'Dirección comercial'}</p>
+                  <p className="text-gray-500">{settings.business_phone || 'Teléfono'}</p>
+                  <div className="border-t border-dashed border-gray-300 my-2" />
+                  <p>1x Pollo Crispy Familiar... {settings.currency_symbol || 'L'} 190.00</p>
+                  <div className="border-t border-dashed border-gray-300 my-2" />
+                  <p className="font-bold text-gray-900">
+                    TOTAL: {settings.currency_symbol || 'L'} 190.00
+                  </p>
+                  <div className="border-t border-dashed border-gray-300 my-2" />
+                  <p className="text-gray-500">{settings.ticket_footer || '¡Gracias por su compra!'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

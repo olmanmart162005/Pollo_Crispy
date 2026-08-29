@@ -10,8 +10,16 @@ export type ProfileWithBranches = Profile & {
 
 export const usersService = {
   async getAll(): Promise<ProfileWithBranches[]> {
-    const { data: profiles, error } = await supabase.from('profiles').select('*').order('full_name')
-    if (error) throw error
+    let profiles: Profile[] = []
+
+    const { data: rpcProfiles, error: rpcErr } = await supabase.rpc('get_app_users_with_email')
+    if (!rpcErr && rpcProfiles) {
+      profiles = rpcProfiles as Profile[]
+    } else {
+      const { data, error } = await supabase.from('profiles').select('*').order('full_name')
+      if (error) throw error
+      profiles = (data || []) as Profile[]
+    }
 
     const { data: userBranches } = await supabase.from('user_branches').select('user_id, branch_id')
 
@@ -23,7 +31,7 @@ export const usersService = {
       })
     }
 
-    return (profiles || []).map((p: Profile) => ({
+    return profiles.map((p: Profile) => ({
       ...p,
       branch_ids: branchMap[p.id] || [],
     })) as ProfileWithBranches[]
@@ -32,6 +40,22 @@ export const usersService = {
   async updateProfile(id: string, updates: Partial<Profile>): Promise<void> {
     const { error } = await supabase.from('profiles').update(updates).eq('id', id)
     if (error) throw error
+
+    // Log to audit if current session exists
+    const { data: currentSession } = await supabase.auth.getSession()
+    if (currentSession?.session?.user?.id) {
+      try {
+        await supabase.from('audit_logs').insert({
+          user_id: currentSession.session.user.id,
+          action: 'UPDATE_PROFILE',
+          table_name: 'profiles',
+          record_id: id,
+          new_data: updates,
+        })
+      } catch (logErr) {
+        console.warn('Audit log error (ignored):', logErr)
+      }
+    }
   },
 
   async getUserBranches(userId: string): Promise<string[]> {
@@ -54,6 +78,79 @@ export const usersService = {
   async toggleActive(id: string, isActive: boolean): Promise<void> {
     const { error } = await supabase.from('profiles').update({ is_active: isActive }).eq('id', id)
     if (error) throw error
+
+    const { data: currentSession } = await supabase.auth.getSession()
+    if (currentSession?.session?.user?.id) {
+      try {
+        await supabase.from('audit_logs').insert({
+          user_id: currentSession.session.user.id,
+          action: isActive ? 'ACTIVATE_USER' : 'DEACTIVATE_USER',
+          table_name: 'profiles',
+          record_id: id,
+          new_data: { is_active: isActive },
+        })
+      } catch (logErr) {
+        console.warn('Audit log error (ignored):', logErr)
+      }
+    }
+  },
+
+  async adminResetPassword(userId: string, newPassword: string): Promise<void> {
+    // Call secure backend RPC function
+    const { data, error } = await supabase.rpc('admin_reset_user_password', {
+      p_target_user_id: userId,
+      p_new_password: newPassword,
+    })
+
+    if (error) {
+      // Fallback: if script 11 was not yet executed, attempt reset_app_user_password
+      const { data: fallbackData, error: fallbackErr } = await supabase.rpc('reset_app_user_password', {
+        p_target_user_id: userId,
+        p_new_password: newPassword,
+      })
+
+      if (fallbackErr) {
+        throw new Error(fallbackErr.message || error.message || 'No se pudo restablecer la contraseña.')
+      }
+
+      if (fallbackData && fallbackData.success === false) {
+        throw new Error(fallbackData.error || 'Error al restablecer la contraseña.')
+      }
+
+      return
+    }
+
+    if (data && data.success === false) {
+      throw new Error(data.error || 'No fue posible cambiar la contraseña.')
+    }
+  },
+
+  async checkUserHistory(userId: string): Promise<{ hasHistory: boolean; message?: string }> {
+    try {
+      // Query sales count for this user
+      const { count: salesCount } = await supabase
+        .from('sales')
+        .select('*', { count: 'exact', head: true })
+        .eq('cashier_id', userId)
+
+      // Query cash registers for this user
+      const { count: registersCount } = await supabase
+        .from('cash_registers')
+        .select('*', { count: 'exact', head: true })
+        .eq('cashier_id', userId)
+
+      const hasHistory = (salesCount ?? 0) > 0 || (registersCount ?? 0) > 0
+
+      return {
+        hasHistory,
+        message: hasHistory
+          ? `Este usuario cuenta con ${salesCount || 0} ventas y ${registersCount || 0} turnos de caja en el historial.`
+          : undefined,
+      }
+    } catch {
+      // If direct count fails due to RLS, default to safe false/true
+      return { hasHistory: false }
+    }
   },
 
   async createUser(params: {
@@ -67,7 +164,7 @@ export const usersService = {
     const cleanEmail = params.email.trim().toLowerCase()
     const cleanName = params.fullName.trim()
 
-    // 1. Crear usuario llamando directamente a la API REST de Supabase Auth (Sin conflictos de GoTrueClient ni localStorage)
+    // 1. Crear usuario llamando directamente a la API REST de Supabase Auth
     const res = await fetch(`${supabaseUrl}/auth/v1/signup`, {
       method: 'POST',
       headers: {
@@ -80,8 +177,8 @@ export const usersService = {
         data: {
           full_name: cleanName,
           role: params.role,
-        }
-      })
+        },
+      }),
     })
 
     const responseData = await res.json()
@@ -91,7 +188,7 @@ export const usersService = {
     if (res.ok && (responseData.id || responseData.user?.id)) {
       userId = responseData.id || responseData.user?.id
     } else {
-      // Si la API REST nativa devuelve algún detalle, intentar mediante la RPC asegurada
+      // Intentar mediante la RPC asegurada
       const { data: rpcData, error: rpcErr } = await supabase.rpc('create_app_user', {
         p_email: cleanEmail,
         p_password: params.password,
@@ -127,13 +224,17 @@ export const usersService = {
     // 4. Registro de Auditoría
     const { data: currentSession } = await supabase.auth.getSession()
     if (currentSession?.session?.user?.id) {
-      await supabase.from('audit_logs').insert({
-        user_id: currentSession.session.user.id,
-        action: 'CREATE_USER',
-        table_name: 'profiles',
-        record_id: userId,
-        new_data: { email: cleanEmail, full_name: cleanName, role: params.role, branches: params.branchIds },
-      })
+      try {
+        await supabase.from('audit_logs').insert({
+          user_id: currentSession.session.user.id,
+          action: 'CREATE_USER',
+          table_name: 'profiles',
+          record_id: userId,
+          new_data: { email: cleanEmail, full_name: cleanName, role: params.role, branches: params.branchIds },
+        })
+      } catch (logErr) {
+        console.warn('Audit log error (ignored):', logErr)
+      }
     }
 
     return { user_id: userId!, email: cleanEmail, role: params.role }
@@ -145,7 +246,7 @@ export const usersService = {
     })
     if (error) throw error
     if (data && data.success === false) {
-      throw new Error(data.error)
+      throw new Error(data.error || 'No se pudo eliminar el usuario.')
     }
   },
 }

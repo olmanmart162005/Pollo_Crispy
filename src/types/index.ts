@@ -3,6 +3,7 @@ export type UserRole = 'SUPER_ADMIN' | 'ADMIN' | 'CAJERO'
 export interface Profile {
   id: string
   full_name: string
+  email?: string
   phone?: string
   role: UserRole
   is_active: boolean

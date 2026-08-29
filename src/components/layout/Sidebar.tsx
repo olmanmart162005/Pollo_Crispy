@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ShoppingCart, Receipt, Archive,
@@ -58,12 +59,17 @@ function BranchBadge() {
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { profile, signOut } = useAuth()
   const { role } = usePermissions()
+  const [avatarError, setAvatarError] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    setAvatarError(false)
+  }, [profile?.avatar_url])
 
   const handleSignOut = async () => {
     await signOut()
-    navigate('/login')
-    toast.success('Sesión cerrada')
+    navigate('/login', { replace: true })
+    toast.success('Sesión cerrada correctamente')
   }
 
   const visibleItems = navItems.filter(item => {
@@ -75,6 +81,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const roleBadgeColor = role === 'SUPER_ADMIN'
     ? 'bg-purple-100 text-purple-700'
     : role === 'ADMIN' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+
+  const userInitial = profile?.full_name?.charAt(0)?.toUpperCase() || '?'
 
   const sidebarContent = (
     <div className="flex flex-col h-full bg-white border-r border-gray-100">
@@ -102,25 +110,18 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       {/* Profile */}
       <div className="px-3 py-3 border-b border-gray-50">
         <div className="flex items-center gap-3 px-3 py-2.5 bg-red-50/50 rounded-xl border border-red-100">
-          {profile?.avatar_url ? (
+          {profile?.avatar_url && !avatarError ? (
             <img
               src={profile.avatar_url}
               alt={profile.full_name}
               className="w-8 h-8 rounded-full object-cover border border-red-400 shrink-0"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = 'none';
-                if (e.currentTarget.nextElementSibling) {
-                  (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'flex';
-                }
-              }}
+              onError={() => setAvatarError(true)}
             />
-          ) : null}
-          <div
-            className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm"
-            style={{ display: profile?.avatar_url ? 'none' : 'flex' }}
-          >
-            {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-          </div>
+          ) : (
+            <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-sm">
+              {userInitial}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-gray-900 truncate">{profile?.full_name || 'Usuario'}</div>
             <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${roleBadgeColor}`}>

@@ -21,6 +21,9 @@ CREATE INDEX IF NOT EXISTS idx_user_passkeys_credential_id ON public.user_passke
 -- Habilitar Row Level Security (RLS)
 ALTER TABLE public.user_passkeys ENABLE ROW LEVEL SECURITY;
 
+-- Permisos de tabla
+GRANT ALL ON TABLE public.user_passkeys TO authenticated, service_role;
+
 -- Políticas de RLS
 DROP POLICY IF EXISTS "user_passkeys_select" ON public.user_passkeys;
 CREATE POLICY "user_passkeys_select" ON public.user_passkeys
@@ -93,3 +96,6 @@ BEGIN
   );
 END;
 $$;
+
+-- Otorga permisos explícitos de ejecución a los usuarios anónimos (pantalla de login) y autenticados
+GRANT EXECUTE ON FUNCTION public.login_with_passkey(TEXT) TO anon, authenticated, service_role;

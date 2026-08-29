@@ -213,15 +213,28 @@ export const passkeyService = {
 
       const credentialIdStr = assertion.id || arrayBufferToBase64Url(assertion.rawId)
 
-      // Verificar en Supabase
+      // Verificar en Supabase mediante la función RPC segura login_with_passkey
       const { data, error } = await supabase.rpc('login_with_passkey', {
         p_credential_id: credentialIdStr,
       })
 
-      if (error || !data) {
+      if (error) {
+        console.error('Error llamando a login_with_passkey RPC:', error)
+        if (
+          error.code === '42883' ||
+          error.message?.includes('Could not find the function') ||
+          error.message?.includes('PGRST202') ||
+          (error as any).status === 400 ||
+          (error as any).status === 403
+        ) {
+          return {
+            success: false,
+            error: 'Debes ejecutar el nuevo script sql/12_passkeys.sql en el Editor SQL de tu proyecto Supabase para habilitar los permisos biométricos.',
+          }
+        }
         return {
           success: false,
-          error: 'Credencial biométrica no encontrada o no válida en este sistema.',
+          error: error.message || 'Error al validar la credencial biométrica en el servidor.',
         }
       }
 

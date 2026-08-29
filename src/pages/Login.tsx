@@ -52,6 +52,12 @@ export default function Login() {
   }
 
   const handlePasskeyLogin = async () => {
+    const localId = passkeyService.getLocalPasskeyId()
+    if (!localId) {
+      toast.error('Aún no has activado el acceso por huella en este dispositivo. Inicia sesión con tu contraseña y actívalo en Configuración → Seguridad.', { duration: 6000 })
+      return
+    }
+
     setPasskeyLoading(true)
     try {
       await signInWithPasskey()

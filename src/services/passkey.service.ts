@@ -35,21 +35,21 @@ export function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
 function getDeviceName(): string {
   const userAgent = navigator.userAgent || ''
   if (/windows/i.test(userAgent)) return 'Windows Hello (Huella / Rostro / PIN)'
-  if (/android/i.test(userAgent)) return 'Biometría Android'
+  if (/android/i.test(userAgent)) return 'Huella / Biometría Android'
   if (/iphone|ipad|ipod/i.test(userAgent)) return 'Face ID / Touch ID (iOS)'
   if (/macintosh/i.test(userAgent)) return 'Touch ID (macOS)'
-  return 'Autenticador de Dispositivo'
+  return 'Biometría de Dispositivo'
 }
 
 export const passkeyService = {
-  // Comprobar compatibilidad del dispositivo/navegador con WebAuthn y autenticadores de plataforma
+  // Comprobar si el navegador y el dispositivo soportan autenticación biométrica nativa
   async isSupported(): Promise<boolean> {
     if (!window.PublicKeyCredential) {
       return false
     }
 
+    // En navegadores web, localhost y HTTPS son contextos seguros válidos
     if (!window.isSecureContext) {
-      // Localhost cuenta como contexto seguro en los navegadores
       const isLocalhost = Boolean(
         window.location.hostname === 'localhost' ||
           window.location.hostname === '127.0.0.1' ||
@@ -64,13 +64,17 @@ export const passkeyService = {
         return available
       }
       return true
-    } catch (err) {
-      console.warn('Error comprobando autenticador de plataforma:', err)
+    } catch {
       return true
     }
   },
 
-  // Obtener passkeys registradas del usuario autenticado
+  // Saber si este dispositivo local ya tiene una huella/passkey vinculada
+  getLocalPasskeyId(): string | null {
+    return localStorage.getItem('pollo_registered_passkey')
+  },
+
+  // Obtener passkeys registradas desde la base de datos
   async getUserPasskeys(userId: string): Promise<UserPasskey[]> {
     try {
       const { data, error } = await supabase
@@ -79,26 +83,24 @@ export const passkeyService = {
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
 
-      if (error) {
-        console.warn('No se encontraron passkeys o la tabla aún no se ha creado:', error.message)
-        return []
-      }
+      if (error) return []
       return data || []
     } catch {
       return []
     }
   },
 
-  // Registrar nueva Passkey en el dispositivo mediante WebAuthn
+  // PASO 1: REGISTRO — Solicitar al SO la activación biométrica (Samsung, iPhone, Windows Hello)
   async registerPasskey(userId: string, email: string): Promise<{ success: boolean; message: string }> {
     const supported = await this.isSupported()
     if (!supported) {
-      throw new Error('Tu dispositivo o navegador no soporta la autenticación biométrica WebAuthn / Passkeys.')
+      throw new Error('Tu dispositivo no soporta la autenticación biométrica WebAuthn.')
     }
 
     const challenge = window.crypto.getRandomValues(new Uint8Array(32))
     const userIdBytes = new TextEncoder().encode(userId)
 
+    // Configuración para invocar directamente el sensor biométrico del dispositivo (platform authenticator)
     const publicKeyOptions: PublicKeyCredentialCreationOptions = {
       challenge,
       rp: {
@@ -115,57 +117,55 @@ export const passkeyService = {
         { alg: -257, type: 'public-key' },  // RS256
       ],
       authenticatorSelection: {
-        authenticatorAttachment: 'platform', // Windows Hello, Touch ID, Face ID, Android Biometrics
+        authenticatorAttachment: 'platform', // Obliga a usar la huella / Face ID / Windows Hello nativo del dispositivo
         userVerification: 'required',
-        residentKey: 'preferred',
+        residentKey: 'required',
       },
       timeout: 60000,
       attestation: 'none',
     }
 
     try {
+      // Abre el diálogo nativo del sistema operativo (Huella en Samsung, Face ID en iPhone, Windows Hello en PC)
       const credential = (await navigator.credentials.create({
         publicKey: publicKeyOptions,
       })) as PublicKeyCredential
 
       if (!credential || !credential.rawId) {
-        throw new Error('No se recibió la credencial del dispositivo.')
+        throw new Error('No se completó la verificación biométrica.')
       }
 
       const credentialIdStr = arrayBufferToBase64Url(credential.rawId)
       const deviceName = getDeviceName()
 
-      // Guardar únicamente la metadata de la credencial criptográfica pública (NUNCA huellas ni claves privadas)
+      // Guardar únicamente la metadata pública necesaria (NUNCA huellas ni claves privadas)
       const { error } = await supabase.from('user_passkeys').insert({
         user_id: userId,
         credential_id: credentialIdStr,
         device_name: deviceName,
       })
 
-      if (error) {
-        if (error.code === '23505') {
-          return {
-            success: fontSuccessCheck(true),
-            message: 'Este dispositivo ya tiene una Passkey registrada en el sistema.',
-          }
-        }
+      if (error && error.code !== '23505') {
         throw error
       }
 
+      // Guardar el id localmente para permitir el acceso biométrico directo en el login
+      localStorage.setItem('pollo_registered_passkey', credentialIdStr)
+
       return {
         success: true,
-        message: 'Acceso por huella / Passkey activado correctamente en este dispositivo.',
+        message: 'Acceso biométrico activado correctamente en este dispositivo.',
       }
     } catch (err: any) {
-      console.error('Error registrando Passkey:', err)
+      console.error('Error al registrar biometría:', err)
       if (err.name === 'NotAllowedError') {
-        throw new Error('Cancelaste la verificación de Windows Hello / biometría.')
+        throw new Error('Cancelaste la autenticación biométrica en tu dispositivo.')
       }
-      throw new Error(err.message || 'Error al comunicarse con el lector biométrico del dispositivo.')
+      throw new Error(err.message || 'Error al comunicarse con el sensor biométrico del dispositivo.')
     }
   },
 
-  // Autenticar mediante Passkey en el Login
+  // PASO 2: AUTENTICACIÓN — Iniciar sesión con la huella / Face ID / Windows Hello del dispositivo
   async authenticatePasskey(): Promise<{
     success: boolean
     user_id?: string
@@ -178,12 +178,14 @@ export const passkeyService = {
     if (!supported) {
       return {
         success: false,
-        error: 'Tu dispositivo o navegador no soporta autenticación biométrica Passkey.',
+        error: 'Tu dispositivo no soporta autenticación biométrica.',
       }
     }
 
+    const localCredId = this.getLocalPasskeyId()
     const challenge = window.crypto.getRandomValues(new Uint8Array(32))
 
+    // Preparar los parámetros de autenticación nativa
     const publicKeyOptions: PublicKeyCredentialRequestOptions = {
       challenge,
       timeout: 60000,
@@ -191,7 +193,18 @@ export const passkeyService = {
       rpId: window.location.hostname,
     }
 
+    // Si tenemos la credencial local registrada, la especificamos en allowCredentials para activar directamente el lector nativo
+    if (localCredId) {
+      publicKeyOptions.allowCredentials = [
+        {
+          type: 'public-key',
+          id: base64UrlToArrayBuffer(localCredId),
+        },
+      ]
+    }
+
     try {
+      // Activa el lector nativo del dispositivo (Sensor de Huella Samsung/Android, Face ID, Windows Hello)
       const assertion = (await navigator.credentials.get({
         publicKey: publicKeyOptions,
       })) as PublicKeyCredential
@@ -199,22 +212,21 @@ export const passkeyService = {
       if (!assertion || !assertion.rawId) {
         return {
           success: false,
-          error: 'No se recibió la respuesta biométrica del dispositivo.',
+          error: 'No se completó la lectura biométrica.',
         }
       }
 
       const credentialIdStr = arrayBufferToBase64Url(assertion.rawId)
 
-      // Validar la credencial biométrica de forma segura en el servidor
+      // Verificar la credencial en el servidor Supabase
       const { data, error } = await supabase.rpc('login_with_passkey', {
         p_credential_id: credentialIdStr,
       })
 
       if (error || !data) {
-        console.error('Error procesando login_with_passkey:', error)
         return {
           success: false,
-          error: error?.message || 'Credencial biométrica no encontrada o no válida.',
+          error: 'Credencial biométrica no encontrada o no válida en este sistema.',
         }
       }
 
@@ -224,6 +236,9 @@ export const passkeyService = {
           error: data.error || 'No fue posible verificar tu identidad.',
         }
       }
+
+      // Guardar el ID de la credencial usada
+      localStorage.setItem('pollo_registered_passkey', credentialIdStr)
 
       return data
     } catch (err: any) {
@@ -241,13 +256,10 @@ export const passkeyService = {
     }
   },
 
-  // Revocar / Desactivar la Passkey del usuario
+  // Revocar / Desactivar el acceso biométrico del usuario
   async revokePasskey(userId: string): Promise<void> {
+    localStorage.removeItem('pollo_registered_passkey')
     const { error } = await supabase.from('user_passkeys').delete().eq('user_id', userId)
     if (error) throw error
   },
-}
-
-function fontSuccessCheck(val: boolean) {
-  return val
 }

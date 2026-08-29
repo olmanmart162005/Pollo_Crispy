@@ -83,8 +83,8 @@ BEGIN
   -- 4. Obtener correo del usuario
   SELECT email INTO v_email FROM auth.users WHERE id = v_passkey.user_id;
 
-  -- 5. Registrar en bitácora de auditoría
-  INSERT INTO public.audit_logs (user_id, action, details)
+  -- 5. Registrar en bitácora de auditoría (columna new_data)
+  INSERT INTO public.audit_logs (user_id, action, new_data)
   VALUES (v_profile.id, 'PASSKEY_LOGIN', jsonb_build_object('device_name', v_passkey.device_name));
 
   RETURN jsonb_build_object(

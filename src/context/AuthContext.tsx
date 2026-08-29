@@ -107,28 +107,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const parsed = JSON.parse(passkeyStorage)
             if (parsed.userId) {
-              const p = await fetchProfile(parsed.userId)
-              if (p && p.is_active) {
-                const passkeyUser = {
-                  id: parsed.userId,
-                  email: parsed.email,
-                  aud: 'authenticated',
-                  role: 'authenticated',
-                  app_metadata: {},
-                  user_metadata: {},
-                  created_at: new Date().toISOString(),
-                } as User
-                setUser(passkeyUser)
-                setProfile(p)
-                setSession({
-                  access_token: 'passkey_token',
-                  refresh_token: 'passkey_refresh',
-                  expires_in: 3600,
-                  token_type: 'bearer',
-                  user: passkeyUser,
-                })
-                return
-              }
+              // Restaurar sesión con los datos almacenados localmente
+              // (no podemos consultar profiles sin sesión Auth activa por RLS)
+              const passkeyUser = {
+                id: parsed.userId,
+                email: parsed.email,
+                aud: 'authenticated',
+                role: 'authenticated',
+                app_metadata: {},
+                user_metadata: {},
+                created_at: new Date().toISOString(),
+              } as User
+              const passkeyProfile = {
+                id: parsed.userId,
+                email: parsed.email,
+                full_name: parsed.fullName || '',
+                role: parsed.role || 'cashier',
+                is_active: true,
+              } as Profile
+              setUser(passkeyUser)
+              setProfile(passkeyProfile)
+              setSession({
+                access_token: 'passkey_token',
+                refresh_token: 'passkey_refresh',
+                expires_in: 3600,
+                token_type: 'bearer',
+                user: passkeyUser,
+              })
+              return
             }
           } catch {
             localStorage.removeItem('pollo_passkey_session')
@@ -219,14 +225,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(result.error || 'No fue posible autenticarte con este dispositivo.')
     }
 
-    const p = await fetchProfile(result.user_id)
-    if (!p) {
-      throw new Error('No se encontró el perfil de usuario asociado.')
-    }
-    if (!p.is_active) {
-      throw new Error('Tu cuenta se encuentra desactivada. Contacta al administrador.')
-    }
-
+    // Los datos del perfil ya vienen de la función RPC (SECURITY DEFINER),
+    // no necesitamos hacer otra consulta a profiles que sería bloqueada por RLS
     const passkeyUser = {
       id: result.user_id,
       email: result.email,
@@ -237,8 +237,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       created_at: new Date().toISOString(),
     } as User
 
+    // Construir el perfil directamente con los datos de la RPC
+    const passkeyProfile = {
+      id: result.user_id,
+      email: result.email,
+      full_name: result.full_name || '',
+      role: result.role || 'cashier',
+      is_active: true,
+    } as Profile
+
     setUser(passkeyUser)
-    setProfile(p)
+    setProfile(passkeyProfile)
     setSession({
       access_token: 'passkey_token_' + Date.now(),
       refresh_token: 'passkey_refresh_' + Date.now(),
@@ -250,6 +259,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('pollo_passkey_session', JSON.stringify({
       userId: result.user_id,
       email: result.email,
+      fullName: result.full_name,
+      role: result.role,
       timestamp: Date.now(),
     }))
   }

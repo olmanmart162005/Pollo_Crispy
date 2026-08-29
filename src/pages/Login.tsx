@@ -96,10 +96,17 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-950 via-red-900 to-amber-950 flex items-center justify-center p-4">
-      {/* Background decorations */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.15),transparent_50%)] pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_bottom_left,rgba(220,38,38,0.2),transparent_50%)] pointer-events-none" />
+    <div className="min-h-screen bg-gradient-to-br from-red-700 via-red-600 to-amber-600 flex items-center justify-center p-4 select-none overflow-hidden relative">
+      {/* Subtle Background Pattern */}
+      <div
+        className="absolute inset-0 opacity-10 pointer-events-none"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+        }}
+      />
+      {/* Decorative Glow Elements */}
+      <div className="absolute -top-24 -left-24 w-80 h-80 bg-amber-400/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-24 -right-24 w-80 h-80 bg-red-900/30 rounded-full blur-3xl pointer-events-none" />
 
       <div className="w-full max-w-md relative">
         {/* Card */}
@@ -197,10 +204,10 @@ export default function Login() {
                 type="button"
                 onClick={handlePasskeyLogin}
                 disabled={loading || passkeyLoading}
-                className="w-full py-3 px-4 rounded-2xl bg-amber-50 hover:bg-amber-100/80 border border-amber-200 text-amber-900 font-bold text-sm flex items-center justify-center gap-2.5 transition-all shadow-sm active:scale-98"
+                className="w-full py-3 px-4 rounded-2xl bg-red-50 hover:bg-red-100/80 border border-red-200 text-red-900 font-bold text-sm flex items-center justify-center gap-2.5 transition-all shadow-sm active:scale-98"
               >
                 {passkeyLoading ? (
-                  <div className="w-4 h-4 border-2 border-amber-700/30 border-t-amber-700 rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-red-700/30 border-t-red-700 rounded-full animate-spin" />
                 ) : (
                   <Fingerprint size={20} className="text-red-600 shrink-0" />
                 )}

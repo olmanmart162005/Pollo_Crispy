@@ -1,30 +1,23 @@
-import { useState, FormEvent, useEffect } from 'react'
+import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { passkeyService } from '../services/passkey.service'
-import { Eye, EyeOff, LogIn, KeyRound, Mail, ArrowLeft, Fingerprint } from 'lucide-react'
+import { Eye, EyeOff, LogIn, Mail } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import toast from 'react-hot-toast'
 
 export default function Login() {
-  const { signIn, signInWithPasskey } = useAuth()
+  const { signIn } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [passkeyLoading, setPasskeyLoading] = useState(false)
-  const [passkeySupported, setPasskeySupported] = useState(false)
 
   // Recovery modal state
   const [recoveryModalOpen, setRecoveryModalOpen] = useState(false)
   const [recoveryEmail, setRecoveryEmail] = useState('')
   const [sendingRecovery, setSendingRecovery] = useState(false)
-
-  useEffect(() => {
-    passkeyService.isSupported().then(setPasskeySupported)
-  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -48,26 +41,6 @@ export default function Login() {
       }
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handlePasskeyLogin = async () => {
-    const localId = passkeyService.getLocalPasskeyId()
-    if (!localId) {
-      toast.error('Aún no has activado el acceso por huella en este dispositivo. Inicia sesión con tu contraseña y actívalo en Configuración → Seguridad.', { duration: 6000 })
-      return
-    }
-
-    setPasskeyLoading(true)
-    try {
-      await signInWithPasskey()
-      navigate('/dashboard')
-      toast.success('¡Autenticación biométrica exitosa!')
-    } catch (err: any) {
-      const msg = err?.message || 'No fue posible autenticarte con este dispositivo.'
-      toast.error(msg, { duration: 5000 })
-    } finally {
-      setPasskeyLoading(false)
     }
   }
 
@@ -142,7 +115,7 @@ export default function Login() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 autoComplete="email"
-                disabled={loading || passkeyLoading}
+                disabled={loading}
               />
             </div>
 
@@ -171,7 +144,7 @@ export default function Login() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   autoComplete="current-password"
-                  disabled={loading || passkeyLoading}
+                  disabled={loading}
                 />
                 <button
                   type="button"
@@ -185,7 +158,7 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={loading || passkeyLoading}
+              disabled={loading}
               className="btn btn-primary w-full btn-lg mt-2 font-bold shadow-md shadow-red-600/20"
             >
               {loading ? (
@@ -196,25 +169,6 @@ export default function Login() {
               {loading ? 'Ingresando...' : 'Iniciar Sesión'}
             </button>
           </form>
-
-          {/* Biometric Passkey Option */}
-          {passkeySupported && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <button
-                type="button"
-                onClick={handlePasskeyLogin}
-                disabled={loading || passkeyLoading}
-                className="w-full py-3 px-4 rounded-2xl bg-red-50 hover:bg-red-100/80 border border-red-200 text-red-900 font-bold text-sm flex items-center justify-center gap-2.5 transition-all shadow-sm active:scale-98"
-              >
-                {passkeyLoading ? (
-                  <div className="w-4 h-4 border-2 border-red-700/30 border-t-red-700 rounded-full animate-spin" />
-                ) : (
-                  <Fingerprint size={20} className="text-red-600 shrink-0" />
-                )}
-                <span>{passkeyLoading ? 'Verificando huella...' : 'Entrar con huella / Passkey'}</span>
-              </button>
-            </div>
-          )}
 
           <p className="text-xs text-gray-400 text-center mt-6">
             ¿Problemas para acceder? Contacta al administrador.

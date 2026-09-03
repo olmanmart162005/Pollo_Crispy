@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useState, useRef, ReactNode } fro
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { Profile } from '../types'
-import { passkeyService } from '../services/passkey.service'
 
 interface AuthContextType {
   user: User | null
@@ -11,7 +10,6 @@ interface AuthContextType {
   loading: boolean
   initError: string | null
   signIn: (email: string, password: string) => Promise<void>
-  signInWithPasskey: () => Promise<void>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   retryInit: () => void
@@ -85,11 +83,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession()
         if (sessionError) throw sessionError
 
-        if (currentSession?.user) {
+          if (currentSession?.user) {
           const p = await fetchProfile(currentSession.user.id)
           if (!p || !p.is_active) {
             await supabase.auth.signOut()
-            localStorage.removeItem('pollo_passkey_session')
             setUser(null)
             setSession(null)
             setProfile(null)
@@ -99,46 +96,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(currentSession)
           setUser(currentSession.user)
           return
-        }
-
-        // Comprobar si existe una sesión previa por Passkey en el navegador
-        const passkeyStorage = localStorage.getItem('pollo_passkey_session')
-        if (passkeyStorage) {
-          try {
-            const parsed = JSON.parse(passkeyStorage)
-            if (parsed.userId) {
-              // Restaurar sesión con los datos almacenados localmente
-              // (no podemos consultar profiles sin sesión Auth activa por RLS)
-              const passkeyUser = {
-                id: parsed.userId,
-                email: parsed.email,
-                aud: 'authenticated',
-                role: 'authenticated',
-                app_metadata: {},
-                user_metadata: {},
-                created_at: new Date().toISOString(),
-              } as User
-              const passkeyProfile = {
-                id: parsed.userId,
-                email: parsed.email,
-                full_name: parsed.fullName || '',
-                role: parsed.role || 'cashier',
-                is_active: true,
-              } as Profile
-              setUser(passkeyUser)
-              setProfile(passkeyProfile)
-              setSession({
-                access_token: 'passkey_token',
-                refresh_token: 'passkey_refresh',
-                expires_in: 3600,
-                token_type: 'bearer',
-                user: passkeyUser,
-              })
-              return
-            }
-          } catch {
-            localStorage.removeItem('pollo_passkey_session')
-          }
         }
 
         setSession(null)
@@ -170,7 +127,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const p = await fetchProfile(newSession.user.id)
           if (!p || !p.is_active) {
             await supabase.auth.signOut()
-            localStorage.removeItem('pollo_passkey_session')
             setUser(null)
             setSession(null)
             setProfile(null)
@@ -178,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(newSession)
             setUser(newSession.user)
           }
-        } else if (!localStorage.getItem('pollo_passkey_session')) {
+        } else {
           setSession(null)
           setUser(null)
           setProfile(null)
@@ -191,7 +147,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signIn = async (email: string, password: string) => {
-    localStorage.removeItem('pollo_passkey_session')
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
@@ -219,59 +174,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signInWithPasskey = async () => {
-    const result = await passkeyService.authenticatePasskey()
-    if (!result.success || !result.user_id) {
-      throw new Error(result.error || 'No fue posible autenticarte con este dispositivo.')
-    }
-
-    // Los datos del perfil ya vienen de la función RPC (SECURITY DEFINER),
-    // no necesitamos hacer otra consulta a profiles que sería bloqueada por RLS
-    const passkeyUser = {
-      id: result.user_id,
-      email: result.email,
-      aud: 'authenticated',
-      role: 'authenticated',
-      app_metadata: {},
-      user_metadata: {},
-      created_at: new Date().toISOString(),
-    } as User
-
-    // Construir el perfil directamente con los datos de la RPC
-    const passkeyProfile = {
-      id: result.user_id,
-      email: result.email,
-      full_name: result.full_name || '',
-      role: result.role || 'cashier',
-      is_active: true,
-    } as Profile
-
-    setUser(passkeyUser)
-    setProfile(passkeyProfile)
-    setSession({
-      access_token: 'passkey_token_' + Date.now(),
-      refresh_token: 'passkey_refresh_' + Date.now(),
-      expires_in: 3600,
-      token_type: 'bearer',
-      user: passkeyUser,
-    })
-
-    localStorage.setItem('pollo_passkey_session', JSON.stringify({
-      userId: result.user_id,
-      email: result.email,
-      fullName: result.full_name,
-      role: result.role,
-      timestamp: Date.now(),
-    }))
-  }
-
   const signOut = async () => {
     try {
       await supabase.auth.signOut()
     } catch (err) {
       console.warn('Sign out error:', err)
     } finally {
-      localStorage.removeItem('pollo_passkey_session')
       localStorage.removeItem('activeBranchId')
       setProfile(null)
       setUser(null)
@@ -289,7 +197,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         initError,
         signIn,
-        signInWithPasskey,
         signOut,
         refreshProfile,
         retryInit: initAuth,

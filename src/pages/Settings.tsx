@@ -23,11 +23,8 @@ import {
   X,
   MapPin,
   Mail,
-  Fingerprint,
-  Trash2,
 } from 'lucide-react'
 import { PageLoader } from '../components/ui/EmptyState'
-import { passkeyService, UserPasskey } from '../services/passkey.service'
 import toast from 'react-hot-toast'
 
 const SETTINGS_FIELDS = [
@@ -76,58 +73,9 @@ export default function Settings() {
   const [showPassword, setShowPassword] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
 
-  // Passkey / Biometría state
-  const [passkeys, setPasskeys] = useState<UserPasskey[]>([])
-  const [passkeySupported, setPasskeySupported] = useState(false)
-  const [registeringPasskey, setRegisteringPasskey] = useState(false)
-  const [revokingPasskey, setRevokingPasskey] = useState(false)
-
   const hasMinLength = newPassword.length >= 6
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword
   const isPasswordValid = hasMinLength && passwordsMatch
-
-  useEffect(() => {
-    if (user?.id) {
-      passkeyService.isSupported().then(setPasskeySupported)
-      loadUserPasskeys()
-    }
-  }, [user?.id])
-
-  const loadUserPasskeys = async () => {
-    if (user?.id) {
-      const list = await passkeyService.getUserPasskeys(user.id)
-      setPasskeys(list)
-    }
-  }
-
-  const handleRegisterPasskey = async () => {
-    if (!user || !user.email) return
-    setRegisteringPasskey(true)
-    try {
-      const res = await passkeyService.registerPasskey(user.id, user.email)
-      toast.success(res.message)
-      await loadUserPasskeys()
-    } catch (err: any) {
-      toast.error(err.message || 'Error al activar acceso por huella.')
-    } finally {
-      setRegisteringPasskey(false)
-    }
-  }
-
-  const handleRevokePasskey = async () => {
-    if (!user) return
-    if (!window.confirm('¿Deseas desactivar el acceso por huella / Passkey de tu cuenta?')) return
-    setRevokingPasskey(true)
-    try {
-      await passkeyService.revokePasskey(user.id)
-      toast.success('Acceso por huella desactivado correctamente.')
-      await loadUserPasskeys()
-    } catch (err: any) {
-      toast.error(err.message || 'Error al desactivar el acceso por huella.')
-    } finally {
-      setRevokingPasskey(false)
-    }
-  }
 
   useEffect(() => {
     if (profile) {
@@ -541,123 +489,6 @@ export default function Settings() {
                 </button>
               </div>
             </form>
-          </div>
-
-          {/* ── SECCIÓN: BIOMETRÍA Y PASSKEYS (WEBAUTHN) ── */}
-          <div className="card card-body space-y-5 border border-red-100 bg-gradient-to-br from-red-50/40 via-white to-amber-50/40">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-4">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-red-600/20">
-                  <Fingerprint size={24} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-900 font-display text-base sm:text-lg">
-                    Acceso con Huella Digital / Biometría
-                  </h3>
-                  <p className="text-xs text-gray-500 mt-0.5 max-w-lg">
-                    Accede al sistema sin escribir tu clave usando Windows Hello, Touch ID, Face ID o la huella registrada en tu teléfono.
-                  </p>
-                </div>
-              </div>
-
-              <div className="shrink-0 self-start md:self-center">
-                {passkeys.length > 0 ? (
-                  <span className="badge badge-green font-bold text-xs flex items-center gap-1.5 px-3 py-1">
-                    <CheckCircle size={14} /> Acceso biométrico activo
-                  </span>
-                ) : (
-                  <span className="badge badge-gray font-semibold text-xs px-3 py-1">
-                    Sin huella vinculada
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {passkeySupported ? (
-              <div className="space-y-4">
-                {passkeys.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">
-                      Dispositivos con acceso biométrico activado:
-                    </p>
-                    <div className="grid grid-cols-1 gap-2.5">
-                      {passkeys.map(pk => (
-                        <div
-                          key={pk.id}
-                          className="p-3.5 bg-white rounded-2xl border border-gray-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm hover:border-red-200 transition-colors"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold shrink-0">
-                              <Fingerprint size={20} />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-bold text-gray-900 truncate text-sm">{pk.device_name}</p>
-                              <p className="text-[11px] text-gray-400 font-mono mt-0.5">
-                                Registrada el {new Date(pk.created_at).toLocaleDateString('es-HN', { day: '2-digit', month: 'long', year: 'numeric' })}
-                              </p>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={handleRevokePasskey}
-                            disabled={revokingPasskey}
-                            className="btn btn-secondary text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 py-2 px-3.5 shrink-0 self-start sm:self-center font-semibold"
-                          >
-                            <Trash2 size={14} /> Desactivar acceso con huella
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleRegisterPasskey}
-                    disabled={registeringPasskey}
-                    className="btn btn-yellow font-bold text-xs sm:text-sm px-6 py-3 shadow-md hover:shadow-lg active:scale-98 flex items-center justify-center gap-2"
-                  >
-                    {registeringPasskey ? (
-                      <div className="w-4 h-4 border-2 border-amber-900/30 border-t-amber-900 rounded-full animate-spin" />
-                    ) : (
-                      <Fingerprint size={18} />
-                    )}
-                    <span>
-                      {registeringPasskey
-                        ? 'Verificando con dispositivo...'
-                        : 'Activar acceso con huella / Passkey'}
-                    </span>
-                  </button>
-
-                  {passkeys.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleRevokePasskey}
-                      disabled={revokingPasskey}
-                      className="btn btn-secondary font-semibold text-xs text-red-600 border-red-200 hover:bg-red-50 px-5 py-3 flex items-center justify-center gap-1.5"
-                    >
-                      <Trash2 size={14} />
-                      <span>{revokingPasskey ? 'Desactivando...' : 'Desactivar acceso'}</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="p-3.5 bg-white/90 rounded-2xl border border-gray-200/80 text-[11px] text-gray-600 space-y-1">
-                  <p className="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
-                    <Shield size={14} className="text-emerald-600" /> Seguridad nativa del dispositivo:
-                  </p>
-                  <p className="leading-relaxed">
-                    Tu biometría es procesada exclusivamente por tu sistema operativo (Windows Hello, iOS o Android) y <strong>NUNCA es almacenada ni enviada a nuestros servidores</strong>.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="p-3.5 bg-gray-100 rounded-2xl text-xs text-gray-600">
-                La autenticación biométrica WebAuthn no está disponible en este navegador o requiere conexión segura (HTTPS o localhost).
-              </div>
-            )}
           </div>
         </div>
       )}

@@ -142,12 +142,16 @@ export interface CashRegisterRecord {
   observations?: string
   opened_at: string
   closed_at?: string
+  closed_by?: string
+  closed_by_name?: string
   total_sales?: number
   total_amount?: number
   cash_amount?: number
   card_amount?: number
   transfer_amount?: number
   total_transfers?: number
+  cash_expenses?: number
+  total_expenses?: number
 }
 
 export interface CashTransfer {
@@ -190,4 +194,123 @@ export interface AppSetting {
   key: string
   value: unknown
   description?: string
+}
+
+export type InventoryMovementType = 'in' | 'out' | 'adjustment'
+export type InventoryStockStatus = 'available' | 'low_stock' | 'out_of_stock'
+
+export interface InventoryItem {
+  id: string
+  name: string
+  category: string
+  unit_measure: string
+  cost_price: number
+  is_active: boolean
+  created_at: string
+  updated_at?: string
+}
+
+export interface BranchInventoryItem {
+  id: string
+  branch_id: string
+  branch_name?: string
+  branch_code?: string
+  item_id: string
+  item_name: string
+  category: string
+  unit_measure: string
+  cost_price: number
+  item_active?: boolean
+  stock: number
+  min_stock: number
+  total_value: number
+  stock_status: InventoryStockStatus
+  updated_at: string
+}
+
+export interface InventoryMovement {
+  id: string
+  branch_id: string
+  branch_name?: string
+  item_id: string
+  item_name: string
+  category?: string
+  unit_measure?: string
+  movement_type: InventoryMovementType
+  quantity: number
+  previous_stock: number
+  new_stock: number
+  user_id?: string
+  user_name?: string
+  user_role?: string
+  reason: string
+  created_at: string
+}
+
+export interface InventorySummaryMetrics {
+  totalItems: number
+  totalInventoryValue: number
+  lowStockCount: number
+  outOfStockCount: number
+}
+
+export type ExpensePaymentMethod = 'cash' | 'card' | 'transfer' | 'other'
+export type ExpenseStatus = 'active' | 'cancelled'
+
+export interface ExpenseCategory {
+  id: string
+  name: string
+  description?: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface Expense {
+  id: string
+  branch_id: string
+  branch_name?: string
+  branch_code?: string
+  cash_register_id?: string
+  category_id?: string
+  category_name: string
+  description: string
+  amount: number
+  payment_method: ExpensePaymentMethod
+  receipt_number?: string
+  notes?: string
+  expense_date: string
+  created_by: string
+  created_by_name?: string
+  created_by_role?: string
+  authorized_by?: string
+  authorized_by_name?: string
+  authorized_at?: string
+  status: ExpenseStatus
+  cancelled_by?: string
+  cancelled_by_name?: string
+  cancellation_reason?: string
+  cancelled_at?: string
+  created_at: string
+  updated_at?: string
+}
+
+export interface CreateExpenseInput {
+  branchId: string
+  categoryId?: string
+  categoryName: string
+  description: string
+  amount: number
+  paymentMethod: ExpensePaymentMethod
+  receiptNumber?: string
+  notes?: string
+  cashRegisterId?: string
+}
+
+export interface ExpenseSummaryMetrics {
+  totalExpenses: number
+  cashExpenses: number
+  cardExpenses: number
+  transferExpenses: number
+  otherExpenses: number
+  count: number
 }

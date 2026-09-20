@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react'
 import { useReactToPrint } from 'react-to-print'
 import { formatCurrency } from '../../utils'
 import { CartItem, PaymentMethod } from '../../types'
-import { Printer, ShoppingCart, CheckCircle } from 'lucide-react'
+import { Printer, ShoppingCart, CheckCircle, ArrowLeft } from 'lucide-react'
 
 interface SaleTicketProps {
   sale: {
@@ -76,7 +76,27 @@ export default function SaleTicket({ sale, onNewSale }: SaleTicketProps) {
   const hora = now.toLocaleTimeString('es-HN', { hour: '2-digit', minute: '2-digit', hour12: true })
 
   return (
-    <div className="flex items-center justify-center min-h-[80vh] animate-fade-in px-4 py-6">
+    <div className="flex flex-col items-center justify-center min-h-[80vh] animate-fade-in px-4 py-6">
+      {/* Barra de acciones superior arriba del ticket */}
+      <div className="w-full max-w-sm mb-4 flex items-center justify-between no-print">
+        <button
+          onClick={onNewSale}
+          className="btn btn-secondary shadow-sm hover:shadow-md font-bold text-xs sm:text-sm flex items-center gap-2 border border-gray-200 hover:border-red-300 hover:text-red-600 bg-white transition-all cursor-pointer"
+          title="Regresar a Punto de Venta"
+        >
+          <ArrowLeft size={16} className="text-red-600" />
+          <span>Regresar a Ventas</span>
+        </button>
+
+        <button
+          onClick={onPrint}
+          className="btn btn-ghost btn-sm text-xs font-bold text-gray-600 hover:text-red-600 flex items-center gap-1.5 cursor-pointer"
+          title="Imprimir Ticket"
+        >
+          <Printer size={15} /> Imprimir
+        </button>
+      </div>
+
       <div className="w-full max-w-sm">
         {/* Banner de Confirmación */}
         <div className="text-center mb-6 no-print">

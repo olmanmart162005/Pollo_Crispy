@@ -3,21 +3,23 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useBranch } from '../context/BranchContext'
 import { usePermissions } from '../hooks/usePermissions'
-import { cashService } from '../services/cash.service'
+import { cashService, validateOpenCashSchedule, validateCloseCashSchedule } from '../services/cash.service'
 import { cashTransfersService } from '../services/cashTransfers.service'
 import { CashRegisterRecord, CashTransfer } from '../types'
 import { formatCurrency, formatDateTime } from '../utils'
 import { PageLoader } from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { Archive, Lock, Unlock, DollarSign, CreditCard, Clock, Banknote, ArrowUpRight, CheckCircle, AlertCircle, Eye } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function CashRegister() {
   const { profile } = useAuth()
-  const { activeBranch } = useBranch()
+  const { activeBranch, branches, setActiveBranch } = useBranch()
   const { isCajero, isAdmin, isSuperAdmin } = usePermissions()
 
   const [openRegister, setOpenRegister] = useState<CashRegisterRecord | null>(null)
+  const [otherBranchRegister, setOtherBranchRegister] = useState<CashRegisterRecord | null>(null)
   const [branchOpenRegisters, setBranchOpenRegisters] = useState<CashRegisterRecord[]>([])
   const [registersHistory, setRegistersHistory] = useState<CashRegisterRecord[]>([])
   const [transfers, setTransfers] = useState<CashTransfer[]>([])
@@ -27,6 +29,9 @@ export default function CashRegister() {
   // Modals
   const [showOpenModal, setShowOpenModal] = useState(false)
   const [showCloseModal, setShowCloseModal] = useState(false)
+  const [showConfirmCloseDialog, setShowConfirmCloseDialog] = useState(false)
+  const [registerToClose, setRegisterToClose] = useState<CashRegisterRecord | null>(null)
+  const [closeSummary, setCloseSummary] = useState<Record<string, number> | null>(null)
   const [showDetailModal, setShowDetailModal] = useState<CashRegisterRecord | null>(null)
   const [detailSummary, setDetailSummary] = useState<Record<string, number> | null>(null)
 
@@ -35,6 +40,8 @@ export default function CashRegister() {
   const [closingAmount, setClosingAmount] = useState('')
   const [observations, setObservations] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+
+  const canOpenCash = isCajero || isAdmin || isSuperAdmin
 
   useEffect(() => {
     if (profile) loadData()
@@ -54,6 +61,7 @@ export default function CashRegister() {
         setRegistersHistory(hist)
 
         if (reg?.id) {
+          setOtherBranchRegister(null)
           const [s, trs] = await Promise.all([
             cashService.getSummary(reg.id),
             cashTransfersService.getTransfers({ cashRegisterId: reg.id })
@@ -63,6 +71,13 @@ export default function CashRegister() {
         } else {
           setSummary(null)
           setTransfers([])
+          // Verificar si tiene caja abierta en otra sucursal
+          const anyReg = await cashService.getAnyOpenRegister(profile.id)
+          if (anyReg && anyReg.branch_id !== branchId) {
+            setOtherBranchRegister(anyReg)
+          } else {
+            setOtherBranchRegister(null)
+          }
         }
       } else {
         // Admin / Super Admin logic: view active registers in branch and branch history
@@ -78,8 +93,17 @@ export default function CashRegister() {
         setRegistersHistory(hist)
 
         if (selfReg?.id) {
+          setOtherBranchRegister(null)
           const s = await cashService.getSummary(selfReg.id)
           setSummary(s)
+        } else {
+          setSummary(null)
+          const anyReg = await cashService.getAnyOpenRegister(profile.id)
+          if (anyReg && anyReg.branch_id !== branchId) {
+            setOtherBranchRegister(anyReg)
+          } else {
+            setOtherBranchRegister(null)
+          }
         }
       }
     } catch (err) {
@@ -90,10 +114,24 @@ export default function CashRegister() {
     }
   }
 
+  const handleOpenModalClick = () => {
+    const check = validateOpenCashSchedule()
+    if (!check.allowed) {
+      toast.error(check.message || 'No se puede abrir la caja antes de las 6:00 AM.', { duration: 5000, icon: '⚠️' })
+      return
+    }
+    setShowOpenModal(true)
+  }
+
   const handleOpen = async () => {
     if (!profile || !activeBranch) return toast.error('Selecciona una sucursal')
     const amount = parseFloat(openingAmount)
     if (isNaN(amount) || amount < 0) return toast.error('Ingresa un monto inicial válido')
+
+    const check = validateOpenCashSchedule()
+    if (!check.allowed) {
+      return toast.error(check.message || 'No se puede abrir la caja antes de las 6:00 AM.', { duration: 5000, icon: '⚠️' })
+    }
 
     setActionLoading(true)
     try {
@@ -109,16 +147,62 @@ export default function CashRegister() {
     }
   }
 
-  const handleClose = async () => {
-    if (!openRegister) return
+  const openCloseModalFor = async (reg: CashRegisterRecord) => {
+    const check = validateCloseCashSchedule(reg.opened_at)
+    if (!check.allowed) {
+      toast.error(
+        check.message ||
+          'No se puede cerrar la caja todavía. El cierre de caja está habilitado a partir de las 9:00 AM. Por favor, continúe operando hasta el horario permitido.',
+        { duration: 6000, icon: '⚠️' }
+      )
+      return
+    }
+
+    setRegisterToClose(reg)
+    setClosingAmount('')
+    setObservations('')
+    if (reg.id === openRegister?.id && summary) {
+      setCloseSummary(summary)
+    } else {
+      try {
+        const s = await cashService.getSummary(reg.id)
+        setCloseSummary(s)
+      } catch {
+        setCloseSummary(null)
+      }
+    }
+    setShowCloseModal(true)
+  }
+
+  // Abre el diálogo de confirmación antes de ejecutar el cierre definitivo
+  const handleRequestClose = () => {
+    const targetReg = registerToClose || openRegister
+    if (!targetReg) return
     const closing = parseFloat(closingAmount)
-    if (isNaN(closing)) return toast.error('Ingresa el monto de efectivo contado')
+    if (isNaN(closing) || closing < 0) return toast.error('Ingresa el monto de efectivo contado en caja')
+
+    const check = validateCloseCashSchedule(targetReg.opened_at)
+    if (!check.allowed) {
+      return toast.error(check.message || 'El cierre de caja está habilitado a partir de las 9:00 AM.', { duration: 6000, icon: '⚠️' })
+    }
+
+    setShowConfirmCloseDialog(true)
+  }
+
+  // Ejecuta el cierre tras la confirmación del usuario
+  const executeClose = async () => {
+    const targetReg = registerToClose || openRegister
+    if (!targetReg) return
+    const closing = parseFloat(closingAmount)
+    if (isNaN(closing) || closing < 0) return toast.error('Ingresa el monto de efectivo contado')
 
     setActionLoading(true)
     try {
-      await cashService.closeCash(openRegister.id, closing, observations)
+      await cashService.closeCash(targetReg.id, closing, observations)
       toast.success('Caja cerrada correctamente')
+      setShowConfirmCloseDialog(false)
       setShowCloseModal(false)
+      setRegisterToClose(null)
       setClosingAmount('')
       setObservations('')
       loadData()
@@ -141,7 +225,9 @@ export default function CashRegister() {
 
   if (loading) return <PageLoader />
 
-  const expectedCash = summary?.expected_cash ?? ((openRegister?.opening_amount || 0) + (summary?.cash_sales || 0) - (summary?.total_transfers || 0))
+  const activeTargetReg = registerToClose || openRegister
+  const activeEffectiveSummary = registerToClose && registerToClose.id !== openRegister?.id ? closeSummary : summary
+  const expectedCash = activeEffectiveSummary?.expected_cash ?? ((activeTargetReg?.opening_amount || 0) + (activeEffectiveSummary?.cash_sales || 0) - (activeEffectiveSummary?.total_transfers || 0) - (activeEffectiveSummary?.cash_expenses || 0))
   const closingNum = parseFloat(closingAmount) || 0
   const diff = closingNum - expectedCash
 
@@ -160,19 +246,56 @@ export default function CashRegister() {
 
         <div className="flex gap-2">
           {openRegister ? (
-            <button onClick={() => setShowCloseModal(true)} className="btn btn-danger font-bold">
+            <button onClick={() => openCloseModalFor(openRegister)} className="btn btn-danger font-bold">
               <Lock size={16} /> Cerrar Caja
             </button>
-          ) : isCajero ? (
-            <button onClick={() => setShowOpenModal(true)} className="btn btn-primary font-bold shadow-md">
+          ) : canOpenCash && !otherBranchRegister ? (
+            <button onClick={handleOpenModalClick} className="btn btn-primary font-bold shadow-md">
               <Unlock size={16} /> Abrir Mi Caja
             </button>
           ) : null}
         </div>
       </div>
 
-      {/* CAJERO VIEW: Turno activo del Cajero */}
-      {isCajero && openRegister ? (
+      {/* AVISO: Caja Abierta en Otra Sucursal */}
+      {otherBranchRegister && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+              <AlertCircle size={22} />
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-900 text-sm">Tienes un turno de caja abierto en "{otherBranchRegister.branch_name}"</h3>
+              <p className="text-xs text-gray-600 mt-0.5">
+                Aperturado el {formatDateTime(otherBranchRegister.opened_at)} con fondo de {formatCurrency(otherBranchRegister.opening_amount, 'L')}.
+                Para operar en <strong>{activeBranch?.name}</strong> debes cerrar esa caja o cambiarte a esa sucursal.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0 w-full sm:w-auto">
+            {branches.some(b => b.id === otherBranchRegister.branch_id) && (
+              <button
+                onClick={() => {
+                  const b = branches.find(x => x.id === otherBranchRegister.branch_id)
+                  if (b) setActiveBranch(b)
+                }}
+                className="btn btn-secondary btn-sm flex-1 sm:flex-none font-bold"
+              >
+                Ir a {otherBranchRegister.branch_name}
+              </button>
+            )}
+            <button
+              onClick={() => openCloseModalFor(otherBranchRegister)}
+              className="btn btn-danger btn-sm flex-1 sm:flex-none font-bold"
+            >
+              <Lock size={14} /> Cerrar esa Caja
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Turno activo (Cajero o Admin) */}
+      {openRegister ? (
         <div className="card card-body border-t-4 border-t-red-600 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-gray-100">
             <div className="flex items-center gap-3">
@@ -232,12 +355,12 @@ export default function CashRegister() {
             <Link to="/envios" className="btn btn-secondary text-xs font-bold">
               <Banknote size={14} className="text-red-600" /> Ver / Registrar Envíos de Efectivo
             </Link>
-            <button onClick={() => setShowCloseModal(true)} className="btn btn-danger font-bold text-xs">
+            <button onClick={() => openCloseModalFor(openRegister)} className="btn btn-danger font-bold text-xs">
               <Lock size={14} /> Cerrar Mi Caja
             </button>
           </div>
         </div>
-      ) : isCajero ? (
+      ) : isCajero && !otherBranchRegister ? (
         <div className="card card-body text-center py-12">
           <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3 text-red-600">
             <Lock size={32} />
@@ -246,7 +369,7 @@ export default function CashRegister() {
           <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
             Apertura tu turno de caja indicando el fondo inicial para comenzar a cobrar ventas en {activeBranch?.name}.
           </p>
-          <button onClick={() => setShowOpenModal(true)} className="btn btn-primary font-bold mx-auto mt-5 px-6">
+          <button onClick={handleOpenModalClick} className="btn btn-primary font-bold mx-auto mt-5 px-6">
             <Unlock size={18} /> Abrir Caja
           </button>
         </div>
@@ -279,7 +402,17 @@ export default function CashRegister() {
                   {branchOpenRegisters.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="text-center py-8 text-gray-400">
-                        No hay cajas ni turnos abiertos actualmente en esta sucursal.
+                        <div className="space-y-2">
+                          <p>No hay cajas ni turnos abiertos actualmente en esta sucursal.</p>
+                          {canOpenCash && !openRegister && !otherBranchRegister && (
+                            <button
+                              onClick={handleOpenModalClick}
+                              className="btn btn-primary btn-sm mx-auto font-bold inline-flex items-center gap-1.5"
+                            >
+                              <Unlock size={14} /> Abrir Mi Turno de Caja
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ) : (
@@ -297,13 +430,22 @@ export default function CashRegister() {
                           <span className="badge badge-green font-bold">🟢 Abierta</span>
                         </td>
                         <td>
-                          <button
-                            onClick={() => inspectRegister(reg)}
-                            className="btn btn-ghost btn-sm p-1.5 text-red-600 hover:bg-red-50"
-                            title="Supervisar / Ver Detalle"
-                          >
-                            <Eye size={14} /> Supervisar
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => inspectRegister(reg)}
+                              className="btn btn-ghost btn-sm p-1.5 text-red-600 hover:bg-red-50"
+                              title="Supervisar / Ver Detalle"
+                            >
+                              <Eye size={14} /> Supervisar
+                            </button>
+                            <button
+                              onClick={() => openCloseModalFor(reg)}
+                              className="btn btn-outline btn-sm p-1.5 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 font-semibold"
+                              title="Cerrar turno de este cajero"
+                            >
+                              <Lock size={14} /> Cerrar
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -421,16 +563,16 @@ export default function CashRegister() {
       {/* Modal Cierre de Caja */}
       <Modal
         isOpen={showCloseModal}
-        onClose={() => setShowCloseModal(false)}
-        title="Cierre y Arqueo de Caja"
+        onClose={() => { setShowCloseModal(false); setRegisterToClose(null) }}
+        title={`Cierre y Arqueo de Caja — ${activeTargetReg?.cashier_name || profile?.full_name || 'Turno'}`}
         size="md"
         footer={
           <div className="flex gap-3">
-            <button onClick={() => setShowCloseModal(false)} className="btn btn-secondary flex-1">
+            <button onClick={() => { setShowCloseModal(false); setRegisterToClose(null) }} className="btn btn-secondary flex-1">
               Cancelar
             </button>
-            <button onClick={handleClose} disabled={actionLoading} className="btn btn-danger flex-1 font-bold">
-              {actionLoading ? 'Cerrando...' : 'Confirmar Cierre'}
+            <button onClick={handleRequestClose} disabled={actionLoading} className="btn btn-danger flex-1 font-bold">
+              {actionLoading ? 'Verificando...' : 'Confirmar Cierre'}
             </button>
           </div>
         }
@@ -440,16 +582,22 @@ export default function CashRegister() {
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 text-xs space-y-1.5">
             <div className="flex justify-between">
               <span className="text-gray-600">Fondo Inicial:</span>
-              <span className="font-bold">{formatCurrency(openRegister?.opening_amount || 0, 'L')}</span>
+              <span className="font-bold">{formatCurrency(activeTargetReg?.opening_amount || 0, 'L')}</span>
             </div>
             <div className="flex justify-between text-emerald-700 font-semibold">
               <span>(+) Ventas en Efectivo:</span>
-              <span>{formatCurrency(summary?.cash_sales || 0, 'L')}</span>
+              <span>{formatCurrency(activeEffectiveSummary?.cash_sales || 0, 'L')}</span>
             </div>
             <div className="flex justify-between text-red-600 font-semibold">
               <span>(-) Retiros / Envíos de Efectivo:</span>
-              <span>-{formatCurrency(summary?.total_transfers || 0, 'L')}</span>
+              <span>-{formatCurrency(activeEffectiveSummary?.total_transfers || 0, 'L')}</span>
             </div>
+            {Number(activeEffectiveSummary?.cash_expenses || 0) > 0 && (
+              <div className="flex justify-between text-amber-700 font-semibold">
+                <span>(-) Gastos en Efectivo (Operativos):</span>
+                <span>-{formatCurrency(activeEffectiveSummary?.cash_expenses || 0, 'L')}</span>
+              </div>
+            )}
             <div className="flex justify-between font-extrabold text-amber-900 border-t border-dashed border-gray-300 pt-1 text-sm">
               <span>(=) Efectivo Esperado en Caja:</span>
               <span>{formatCurrency(expectedCash, 'L')}</span>
@@ -495,6 +643,19 @@ export default function CashRegister() {
         </div>
       </Modal>
 
+      {/* Diálogo de Confirmación Final de Cierre */}
+      <ConfirmDialog
+        isOpen={showConfirmCloseDialog}
+        onClose={() => setShowConfirmCloseDialog(false)}
+        onConfirm={executeClose}
+        title="¿Está seguro de cerrar la caja?"
+        message="Una vez cerrada, la caja no podrá volver a abrirse y el cierre quedará registrado. Verifique que todos los movimientos y el efectivo hayan sido revisados correctamente."
+        confirmLabel="Sí, cerrar caja"
+        cancelLabel="Cancelar"
+        variant="danger"
+        loading={actionLoading}
+      />
+
       {/* Modal Supervisión para Admins */}
       <Modal
         isOpen={!!showDetailModal}
@@ -528,8 +689,12 @@ export default function CashRegister() {
               <span className="text-base font-extrabold text-red-600">{formatCurrency(detailSummary?.total_transfers || 0, 'L')}</span>
             </div>
             <div className="p-3 bg-amber-50 rounded-xl">
-              <span className="text-amber-900 font-bold block mb-1">Efectivo Esperado</span>
-              <span className="text-base font-extrabold text-amber-900">{formatCurrency(detailSummary?.expected_cash || 0, 'L')}</span>
+              <span className="text-amber-800 font-bold block mb-1">Gastos en Efectivo</span>
+              <span className="text-base font-extrabold text-amber-700">{formatCurrency(detailSummary?.cash_expenses || 0, 'L')}</span>
+            </div>
+            <div className="p-3 bg-purple-50 rounded-xl col-span-2">
+              <span className="text-purple-900 font-bold block mb-1">Efectivo Esperado en Caja</span>
+              <span className="text-lg font-extrabold text-purple-900">{formatCurrency(detailSummary?.expected_cash || 0, 'L')}</span>
             </div>
           </div>
         </div>

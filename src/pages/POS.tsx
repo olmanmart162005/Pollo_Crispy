@@ -285,7 +285,7 @@ export default function POS() {
   }
 
   const CartItemsList = (
-    <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+    <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">
       {cart.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
           <ShoppingCart size={40} className="mb-2 opacity-20 text-red-500" />
@@ -330,7 +330,7 @@ export default function POS() {
   )
 
   const CartFooterSummary = (
-    <>
+    <div className="shrink-0 mt-auto bg-white">
       <div className="px-4 py-3 border-t border-gray-100 space-y-1.5 bg-gray-50/50">
         <div className="flex justify-between text-xs text-gray-600">
           <span>Subtotal</span>
@@ -358,15 +358,15 @@ export default function POS() {
           Cobrar {cart.length > 0 && formatCurrency(total, 'L')}
         </button>
       </div>
-    </>
+    </div>
   )
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-7rem)] pb-20 lg:pb-0">
+    <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-6.2rem)] pb-20 lg:pb-0">
       {/* LEFT: Products Grid Section */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 lg:h-full">
         {/* Search */}
-        <div className="relative mb-3">
+        <div className="relative mb-3 shrink-0">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="input pl-9 h-10 text-sm"
@@ -421,7 +421,7 @@ export default function POS() {
         )}
 
         {/* Products & Combos Responsive Grid */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1">
           {showCombos || (search && displayedCombos.length > 0) ? (
             <>
               {search && <p className="text-xs text-gray-500 mb-2 font-bold uppercase tracking-wider">Combos</p>}
@@ -517,23 +517,47 @@ export default function POS() {
       </div>
 
       {/* RIGHT DESKTOP: Cart Sidebar (Visible on desktop lg:flex) */}
-      <div className="hidden lg:flex w-80 xl:w-96 flex-col bg-white rounded-2xl border border-gray-100 shadow-sm shrink-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-red-50/50">
+      <div className="hidden lg:flex w-80 xl:w-96 flex-col lg:h-full sticky top-0 bg-white rounded-2xl border border-gray-100 shadow-sm shrink-0 overflow-hidden">
+        {/* Cart Header */}
+        <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between bg-red-50/50 shrink-0">
           <div className="flex items-center gap-2">
             <ShoppingCart size={18} className="text-red-600" />
-            <span className="font-bold text-gray-900 font-display">Carrito</span>
+            <span className="font-bold text-gray-900 font-display text-sm">Carrito</span>
             {cart.length > 0 && (
-              <span className="bg-red-600 text-white text-xs font-extrabold w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
+              <span className="bg-red-600 text-white text-xs font-extrabold px-1.5 py-0.5 rounded-full flex items-center justify-center shadow-sm">
                 {totalCartItemsCount}
               </span>
             )}
           </div>
           {cart.length > 0 && (
-            <button onClick={() => setCart([])} className="text-xs font-bold text-red-600 hover:text-red-800">
+            <button
+              onClick={() => setCart([])}
+              className="text-xs font-bold text-red-600 hover:text-red-800 transition-colors"
+            >
               Vaciar
             </button>
           )}
         </div>
+
+        {/* TOP CHECKOUT BAR — Visible directamente desde arriba para facturar sin bajar */}
+        {cart.length > 0 && (
+          <div className="p-3 bg-gradient-to-r from-red-50 via-orange-50 to-amber-50 border-b border-red-100 flex items-center justify-between gap-2 shrink-0 animate-fade-in shadow-inner">
+            <div className="min-w-0">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                Total a Facturar
+              </span>
+              <span className="text-lg xl:text-xl font-black text-red-600 font-display truncate block leading-tight">
+                {formatCurrency(total, 'L')}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowPayModal(true)}
+              className="btn btn-primary btn-sm px-4 py-2 font-black text-xs shadow-md hover:shadow-lg flex items-center gap-1.5 shrink-0"
+            >
+              <CheckCircle size={15} /> Cobrar
+            </button>
+          </div>
+        )}
 
         {CartItemsList}
         {CartFooterSummary}

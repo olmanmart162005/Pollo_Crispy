@@ -18,6 +18,10 @@ import Users from './pages/Users'
 import Reports from './pages/Reports'
 import Audit from './pages/Audit'
 import Settings from './pages/Settings'
+import Inventory from './pages/Inventory'
+import InventoryReports from './pages/InventoryReports'
+import Expenses from './pages/Expenses'
+import ExpenseReports from './pages/ExpenseReports'
 
 import CashTransfers from './pages/CashTransfers'
 import { useAuth } from './context/AuthContext'
@@ -54,6 +58,10 @@ export default function App() {
                 <Route path="/ventas/:id" element={<SaleDetail />} />
                 <Route path="/caja" element={<CashRegister />} />
                 <Route path="/envios" element={<CashTransfers />} />
+                <Route path="/gastos" element={<Expenses />} />
+                <Route path="/gastos/reportes" element={<ExpenseReports />} />
+                <Route path="/inventario" element={<Inventory />} />
+                <Route path="/inventario/reportes" element={<InventoryReports />} />
                 <Route path="/productos" element={<Products />} />
                 <Route path="/categorias" element={<Categories />} />
                 <Route path="/combos" element={<Combos />} />
